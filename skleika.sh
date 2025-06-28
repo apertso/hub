@@ -6,7 +6,7 @@ SOURCE_ARG="${1:-.}"
 SOURCE_DIR=$(cd "$SOURCE_ARG" && pwd)
 
 if [ ! -d "$SOURCE_DIR" ]; then
-    echo "Error: Source directory '$SOURCE_ARG' not found."
+    echo "Error: Source directory '$SOURCE_ARG' not found." >&2
     exit 1
 fi
 
@@ -19,7 +19,7 @@ FINAL_OUTPUT="$SOURCE_DIR/project_code.txt"
 DEFAULT_EXCLUDED_FILES=(
     "package-lock.json" "yarn.lock" ".env" ".env.*" "*.local" "*.bak" "*.tmp"
     "poetry.lock" "Pipfile.lock" "composer.lock" "*skleika*.sh" "README.md"
-    ".DS_Store" "Thumbs.db"
+    ".DS_Store" "Thumbs.db" ".gitignore"
 )
 
 DEFAULT_EXCLUDED_EXTENSIONS=(
@@ -30,7 +30,7 @@ DEFAULT_EXCLUDED_EXTENSIONS=(
 
 # --- Git-Optimized Method ---
 main_git() {
-    echo "INFO: Git repository detected. Using fast, git-based method (awk)."
+    echo "INFO: Git repository detected. Using fast, git-based method (awk)." >&2
     cd "$SOURCE_DIR" || exit 1
 
     # Convert file globs to a regex for grep
@@ -57,7 +57,7 @@ main_git() {
 
 # --- Fallback ripgrep-based Method ---
 main_fallback() {
-    echo "INFO: Not a Git repository. Using fast, ripgrep-based method (awk)."
+    echo "INFO: Not a Git repository. Using fast, ripgrep-based method (awk)." >&2
     cd "$SOURCE_DIR" || exit 1
 
     if ! command -v rg &> /dev/null; then

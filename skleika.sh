@@ -11,12 +11,12 @@ if [ ! -d "$SOURCE_DIR" ]; then
 fi
 
 FINAL_OUTPUT="$SOURCE_DIR/project_code.txt"
+OUTPUT_FILENAME=$(basename "$FINAL_OUTPUT") # Получаем имя файла для исключения
 
 # Exclusions are now primarily handled by git ls-files or ripgrep.
 # These lists are for the additional filtering via grep/rg globs.
-# NOTE: Removed extensions like .sql, as they are often source code.
-# You can add them back if you wish.
 DEFAULT_EXCLUDED_FILES=(
+    "$OUTPUT_FILENAME"
     "package-lock.json" "yarn.lock" ".env" ".env.*" "*.local" "*.bak" "*.tmp"
     "poetry.lock" "Pipfile.lock" "composer.lock" "*skleika*.sh" "README.md"
     ".DS_Store" "Thumbs.db" ".gitignore"
@@ -41,15 +41,6 @@ main_git() {
     local files_regex="($(IFS='|'; echo "${patterns[*]}"))"
     local exts_regex="\\.($(IFS='|'; echo "${DEFAULT_EXCLUDED_EXTENSIONS[*]}"))$"
     local final_exclude_regex="$files_regex$|$exts_regex"
-
-    # THE CORE OPTIMIZATION:
-    # 1. `git ls-files -z`: Prints the file list, null-terminated for safety.
-    # 2. `grep -z -vE`: Filters the list, keeping it null-terminated.
-    # 3. `xargs -0 awk`: Starts ONE awk process. awk receives the entire list of files.
-    # 4. `awk '...'`:
-    #      - `FNR==1`: This condition is true only on the very first line of each new file.
-    #      - `{print "\n\n=== " FILENAME " ==="}`: When a new file starts, print our header.
-    #      - `1`: This is awk shorthand for `{print}`, which prints every line of the file.
     git ls-files -co --exclude-standard -z . | \
     grep -z -vE "$final_exclude_regex" | \
     xargs -0 awk 'FNR==1{print "\n\n=== " FILENAME " ==="}1'
@@ -74,10 +65,7 @@ main_fallback() {
         exclude_globs+=(--glob "!*.$ext")
     done
 
-    # THE CORE OPTIMIZATION (ripgrep version):
-    # 1. `rg --files -0`: Prints null-terminated file list, respecting .gitignore.
-    # 2. `xargs -0 awk`: Starts ONE awk process to handle all files found by ripgrep.
-    rg --files --hidden --no-ignore-vcs -0 "${exclude_globs[@]}" . | \
+    rg --files --hidden -0 "${exclude_globs[@]}" . | \
     xargs -0 awk 'FNR==1{print "\n\n=== " FILENAME " ==="}1'
 }
 
@@ -86,8 +74,8 @@ main_fallback() {
 echo "INFO: Starting code export from $SOURCE_DIR"
 echo "INFO: Final output will be $FINAL_OUTPUT"
 
-# Redirect the output of the entire function block to the file.
-# This is more efficient than redirecting inside the function.
+rm -f "$FINAL_OUTPUT"
+
 {
     if [ -d "$SOURCE_DIR/.git" ]; then
         main_git

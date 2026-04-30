@@ -1,20 +1,21 @@
 #!/bin/bash
 
 # --- Configuration ---
-SOURCE_ARG="${1:-.}"
-# Resolve to absolute path for consistency
-SOURCE_DIR=$(cd "$SOURCE_ARG" && pwd)
+# Первый аргумент - это путь, который мы ХОТИМ включить (по умолчанию текущая папка ".")
+INCLUDE_TARGET="${1:-.}"
+# Разрешаем путь до абсолютного, чтобы не потеряться
+INCLUDE_DIR=$(cd "$(dirname "$INCLUDE_TARGET")" && pwd)/$(basename "$INCLUDE_TARGET")
+# Получаем корень проекта (там, где запущен скрипт), чтобы сохранить туда результат
+PROJECT_ROOT=$(pwd)
 
-if [ ! -d "$SOURCE_DIR" ]; then
-    echo "Error: Source directory '$SOURCE_ARG' not found." >&2
+if [ ! -e "$INCLUDE_TARGET" ]; then
+    echo "Error: Target path '$INCLUDE_TARGET' not found." >&2
     exit 1
 fi
 
-FINAL_OUTPUT="$SOURCE_DIR/project_code.txt"
-OUTPUT_FILENAME=$(basename "$FINAL_OUTPUT") # Получаем имя файла для исключения
+FINAL_OUTPUT="$PROJECT_ROOT/project_code.txt"
+OUTPUT_FILENAME=$(basename "$FINAL_OUTPUT")
 
-# Exclusions are now primarily handled by git ls-files or ripgrep.
-# These lists are for the additional filtering via grep/rg globs.
 DEFAULT_EXCLUDED_FILES=(
     "$OUTPUT_FILENAME"
     "package-lock.json" "yarn.lock" ".env" ".env.*" "*.local" "*.bak" "*.tmp"
@@ -23,17 +24,16 @@ DEFAULT_EXCLUDED_FILES=(
 )
 
 DEFAULT_EXCLUDED_EXTENSIONS=(
-    "png" "jpg" "jpeg" "gif" "bmp" "ico" "svg" "webp" "pdf" "doc" "docx"
+    "png" "jpg" "jpeg" "gif" "bmp" "ico" "icns" "svg" "webp" "pdf" "doc" "docx"
     "xls" "xlsx" "zip" "tar" "gz" "rar" "7z" "mp3" "mp4" "avi" "mov" "mkv"
-    "db" "sqlite" "sqlite3" "pyc" "pyo" "pyd" "log" "lock" "sum" "swp"
+    "db" "sqlite" "sqlite3" "pyc" "pyo" "pyd" "log" "lock" "sum" "swp" "jar"
 )
 
 # --- Git-Optimized Method ---
 main_git() {
     echo "INFO: Git repository detected. Using fast, git-based method (awk)." >&2
-    cd "$SOURCE_DIR" || exit 1
+    cd "$PROJECT_ROOT" || exit 1
 
-    # Convert file globs to a regex for grep
     local patterns=()
     for pattern in "${DEFAULT_EXCLUDED_FILES[@]}"; do
         patterns+=("$(echo "$pattern" | sed -e 's/\./\\./g' -e 's/\*/.*/g')")
@@ -41,7 +41,9 @@ main_git() {
     local files_regex="($(IFS='|'; echo "${patterns[*]}"))"
     local exts_regex="\\.($(IFS='|'; echo "${DEFAULT_EXCLUDED_EXTENSIONS[*]}"))$"
     local final_exclude_regex="$files_regex$|$exts_regex"
-    git ls-files -co --exclude-standard -z . | \
+    
+    # Передаем $INCLUDE_TARGET в git ls-files, чтобы искать только там
+    git ls-files -co --exclude-standard -z "$INCLUDE_TARGET" | \
     grep -z -vE "$final_exclude_regex" | \
     xargs -0 awk 'FNR==1{print "\n\n=== " FILENAME " ==="}1'
 }
@@ -49,11 +51,10 @@ main_git() {
 # --- Fallback ripgrep-based Method ---
 main_fallback() {
     echo "INFO: Not a Git repository. Using fast, ripgrep-based method (awk)." >&2
-    cd "$SOURCE_DIR" || exit 1
+    cd "$PROJECT_ROOT" || exit 1
 
     if ! command -v rg &> /dev/null; then
         echo "Error: ripgrep (rg) is not installed. It is the required fallback." >&2
-        echo "Please install it (e.g., 'sudo apt-get install ripgrep')." >&2
         exit 1
     fi
 
@@ -65,19 +66,19 @@ main_fallback() {
         exclude_globs+=(--glob "!*.$ext")
     done
 
-    rg --files --hidden -0 "${exclude_globs[@]}" . | \
+    # Передаем $INCLUDE_TARGET в rg, чтобы искать только там
+    rg --files --hidden -0 "${exclude_globs[@]}" "$INCLUDE_TARGET" | \
     xargs -0 awk 'FNR==1{print "\n\n=== " FILENAME " ==="}1'
 }
 
-
 # --- Main Processing ---
-echo "INFO: Starting code export from $SOURCE_DIR"
+echo "INFO: Target path to include: $INCLUDE_TARGET"
 echo "INFO: Final output will be $FINAL_OUTPUT"
 
 rm -f "$FINAL_OUTPUT"
 
 {
-    if [ -d "$SOURCE_DIR/.git" ]; then
+    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         main_git
     else
         main_fallback

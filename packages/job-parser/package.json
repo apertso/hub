@@ -16,7 +16,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
-    "test": "vitest run --exclude dist/**"
+    "test": "vitest run --exclude dist/**",
+    "prepack": "pnpm run build"
   },
   "dependencies": {
     "cheerio": "^1.2.0"

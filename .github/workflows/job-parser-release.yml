@@ -1,0 +1,95 @@
+name: job-parser release
+
+on:
+  push:
+    tags:
+      - "job-parser-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    name: Build and attach package tarball
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: packages/job-parser/pnpm-lock.yaml
+
+      - name: Verify tag matches package version
+        id: package
+        run: |
+          tag_version="${GITHUB_REF_NAME#job-parser-v}"
+          package_version="$(node -p "require('./packages/job-parser/package.json').version")"
+
+          if [[ "${tag_version}" != "${package_version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match packages/job-parser version ${package_version}." >&2
+            exit 1
+          fi
+
+          echo "version=${package_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install dependencies
+        working-directory: packages/job-parser
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: packages/job-parser
+        run: pnpm run typecheck
+
+      - name: Test
+        working-directory: packages/job-parser
+        run: pnpm test
+
+      - name: Pack package
+        run: |
+          rm -rf packages/job-parser/dist
+          mkdir -p release-artifacts
+          pnpm --dir packages/job-parser pack --pack-destination "${GITHUB_WORKSPACE}/release-artifacts"
+
+      - name: Verify tarball contains dist
+        id: tarball
+        run: |
+          tarball="$(find release-artifacts -maxdepth 1 -name '*.tgz' -type f | head -n 1)"
+
+          if [[ -z "${tarball}" ]]; then
+            echo "pnpm pack did not create a .tgz artifact." >&2
+            exit 1
+          fi
+
+          tar -tzf "${tarball}" | grep -qx "package/dist/index.js"
+          tar -tzf "${tarball}" | grep -qx "package/dist/index.d.ts"
+
+          echo "path=${tarball}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+          TARBALL_PATH: ${{ steps.tarball.outputs.path }}
+        run: |
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            gh release upload "${TAG_NAME}" "${TARBALL_PATH}" --clobber
+          else
+            gh release create "${TAG_NAME}" "${TARBALL_PATH}" \
+              --title "@hub/job-parser v${PACKAGE_VERSION}" \
+              --notes "Ready-to-install @hub/job-parser tarball with built dist artifacts."
+          fi

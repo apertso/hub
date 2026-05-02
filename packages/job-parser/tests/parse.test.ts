@@ -83,6 +83,49 @@ describe("parseJob", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("does not truncate LinkedIn descriptions when prose mentions languages", async () => {
+    const linkedinGuestHtml = `
+      <html>
+        <body>
+          <h1 class="top-card-layout__title topcard__title">Senior Full Stack Engineer - EMEA</h1>
+          <a class="topcard__org-name-link">Deel</a>
+          <section class="core-section-container my-3 description">
+            <div class="description__text description__text--rich">
+              <section class="show-more-less-html" data-max-lines="5">
+                <div class="show-more-less-html__markup show-more-less-html__markup--clamp-after-5 relative overflow-hidden">
+                  <strong>Who We Are Is What We Do.<br><br></strong>
+                  Deel is the all-in-one payroll and HR platform for global teams. Our vision is to unlock global opportunity for every person, team, and business. Built for the way the world works today, Deel combines HRIS, payroll, compliance, benefits, performance, and equipment management into one seamless platform.<br><br>
+                  Among the largest globally distributed companies in the world, our team of 7,000 spans more than 100 countries, speaks 74 languages, and brings a connected and dynamic culture that drives continuous learning and innovation for our customers.<br><br>
+                  <strong>Summary<br><br></strong>
+                  The Senior Full Stack Engineer is responsible for designing, developing, and maintaining both the front-end and back-end components of Deel's platform.<br><br>
+                  <strong>Responsibilities<br><br></strong>
+                  <ul>
+                    <li>You will develop high-quality, responsive web applications using TypeScript, Javascript, React, and Express.</li>
+                    <li>You will create and optimize database schemas, queries, and interactions with Postgres.</li>
+                  </ul>
+                </div>
+              </section>
+            </div>
+          </section>
+        </body>
+      </html>
+    `;
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input) === "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/4402429247") {
+        return okResponse(linkedinGuestHtml);
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(LINKEDIN_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.jobDescription).toContain("speaks 74 languages");
+    expect(result.jobDescription).toContain("Summary");
+    expect(result.jobDescription).toContain("You will develop high-quality");
+  });
+
   it("uses the Greenhouse board API before generic fallbacks", async () => {
     const greenhousePayload = {
       title: "Senior Node.js Developer",

@@ -147,6 +147,24 @@ function canonicalizeForMatching(value: string): string {
     .toLowerCase();
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function cueRegExp(cue: string): RegExp {
+  const prefix = /^\w/.test(cue) ? "\\b" : "";
+  const suffix = /\w$/.test(cue) ? "\\b" : "";
+  return new RegExp(`${prefix}${escapeRegExp(cue)}${suffix}`, "i");
+}
+
+function cueMatches(line: string, cue: string): boolean {
+  return cueRegExp(cue).test(line);
+}
+
+function cueIndex(line: string, cue: string): number {
+  return cueRegExp(cue).exec(line)?.index ?? -1;
+}
+
 function splitCleanLines(value: string): string[] {
   return value
     .split(/\r?\n+/g)
@@ -213,7 +231,7 @@ function sliceRelevantWindow(lines: string[]): string[] {
   const lowered = lines.map((line) => canonicalizeForMatching(line));
   const startIndex = lowered.findIndex((line) => START_CUES.some((cue) => line.includes(cue)));
   const stopIndex = lowered.findIndex((line, index) =>
-    index > Math.max(0, startIndex) && STOP_CUES.some((cue) => line.includes(cue)),
+    index > Math.max(0, startIndex) && STOP_CUES.some((cue) => cueMatches(line, cue)),
   );
 
   if (startIndex === -1 && stopIndex === -1) {
@@ -253,7 +271,7 @@ function windowedTextFromSingleLine(value: string): string {
   let sliced = normalized.slice(from);
   const slicedLower = canonicalizeForMatching(sliced);
   const stopCandidates = STOP_CUES
-    .map((cue) => slicedLower.indexOf(cue))
+    .map((cue) => cueIndex(slicedLower, cue))
     .filter((index) => index > 0)
     .sort((a, b) => a - b);
   if (stopCandidates.length > 0) {
@@ -470,7 +488,7 @@ export function extractVacancyTextFromHtml(html: string): string {
 export function fallbackVacancyTextFromHtml(html: string): string {
   const lines = expandLines(htmlToLines(html));
   const lowered = lines.map((line) => line.toLowerCase());
-  const stopIndex = lowered.findIndex((line) => STOP_CUES.some((cue) => line.includes(cue)));
+  const stopIndex = lowered.findIndex((line) => STOP_CUES.some((cue) => cueMatches(line, cue)));
   const sliced = stopIndex >= 0 ? lines.slice(0, stopIndex) : lines;
   return linesToText(dedupeLines(sliced));
 }

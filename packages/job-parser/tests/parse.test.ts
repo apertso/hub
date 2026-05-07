@@ -3,6 +3,7 @@ import { parseJob } from "../src/index.js";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const LINKEDIN_URL = "https://www.linkedin.com/jobs/view/4402429247/";
+const RUBY_LINKEDIN_URL = "https://www.linkedin.com/jobs/view/4411409358";
 const GREENHOUSE_URL = "https://job-boards.eu.greenhouse.io/brainrocketltd/jobs/4643018101";
 
 const LONG_DESCRIPTION = [
@@ -124,6 +125,75 @@ describe("parseJob", () => {
     expect(result.jobDescription).toContain("speaks 74 languages");
     expect(result.jobDescription).toContain("Summary");
     expect(result.jobDescription).toContain("You will develop high-quality");
+  });
+
+  it("keeps full LinkedIn descriptions when prose mentions industries and language", async () => {
+    const linkedinGuestHtml = `
+      <html>
+        <body>
+          <h1 class="top-card-layout__title topcard__title">Senior Full-Stack Developer (Next.js)</h1>
+          <a class="topcard__org-name-link">Ruby Labs</a>
+          <section class="core-section-container my-3 description">
+            <div class="description__text description__text--rich">
+              <section class="show-more-less-html" data-max-lines="5">
+                <div class="show-more-less-html__markup show-more-less-html__markup--clamp-after-5 relative overflow-hidden">
+                  <strong>About Us<br><br></strong>
+                  Ruby Labs is a leading tech company that creates and operates innovative consumer products. We offer a diverse range of opportunities across the health, education, and entertainment industries. Our innovative teams are driving the future of consumer-led products, and we're always looking for passionate individuals to join us.<br><br>
+                  <strong>About The Role<br><br></strong>
+                  We’re building and scaling a profitable D2C platform used by hundreds of thousands of customers globally, processing large volumes of traffic and revenue every month. The product is well beyond MVP: it’s battle-tested in production, monetizing at scale, and now entering a phase of rapid growth and expansion.<br><br>
+                  We're looking for a <strong>Senior Next.js Full-Stack Engineer </strong>who brings both technical depth and a sense of ownership. You won't just be shipping code, you'll be shaping architecture, improving reliability, and raising the engineering bar across a system that real users depend on every day.<br><br>
+                  <strong><strong>Key Responsibilities<br><br></strong></strong>
+                  <ul>
+                    <li>Take ownership of core product components from concept to deployment.</li>
+                    <li>Collaborate with the Product team to design scalable and maintainable architectures.</li>
+                    <li>Participate in and lead code reviews and ensure best practices across the team.</li>
+                    <li>Maintain high code quality and application performance in a fast-paced, high-traffic environment.</li>
+                  </ul>
+                  <strong>Qualifications<br><br></strong>
+                  Core Technical Skills<br><br>
+                  <ul>
+                    <li>At least 4 years of experience with Next.js for full-stack application development.</li>
+                    <li>Strong expertise in JavaScript/TypeScript and modern ReactJS.</li>
+                    <li>Experience with CI/CD pipelines, Docker, and cloud infrastructure.</li>
+                  </ul>
+                  Leadership &amp; Collaboration<br><br>
+                  <ul>
+                    <li>Demonstrated ability to mentor other engineers and elevate team performance.</li>
+                    <li>Fluency in Russian and/or Ukrainian language.</li>
+                  </ul>
+                  <strong><strong>Nice to have<br><br></strong></strong>
+                  <ul>
+                    <li>Experience in D2C SaaS products.</li>
+                    <li>Experience working in a fast-paced, high-growth startup environment.</li>
+                  </ul>
+                </div>
+              </section>
+            </div>
+          </section>
+        </body>
+      </html>
+    `;
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input) === "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/4411409358") {
+        return okResponse(linkedinGuestHtml);
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(RUBY_LINKEDIN_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("linkedin");
+    expect(result.companyName).toBe("Ruby Labs");
+    expect(result.positionTitle).toBe("Senior Full-Stack Developer (Next.js)");
+    expect(result.jobDescription.length).toBeGreaterThan(1_000);
+    expect(result.jobDescription).toContain("About The Role");
+    expect(result.jobDescription).toContain("Key Responsibilities");
+    expect(result.jobDescription).toContain("Qualifications");
+    expect(result.jobDescription).toContain("Nice to have");
+    expect(result.jobDescription).toContain("Fluency in Russian and/or Ukrainian language");
+    expect(result.warnings).not.toContain("Job description is short; result may be incomplete.");
   });
 
   it("uses the Greenhouse board API before generic fallbacks", async () => {

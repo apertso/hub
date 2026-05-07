@@ -34,7 +34,6 @@ const NOISE_PATTERNS: RegExp[] = [
   /\bshow fewer jobs like this\b/i,
   /\bexplore top content on linkedin\b/i,
   /\bfind curated posts and insights\b/i,
-  /\blanguage\b/i,
   /\bagree & join linkedin\b/i,
   /\bmore searches\b/i,
   /\blinkedin\s+©\b/i,
@@ -48,10 +47,6 @@ const NOISE_PATTERNS: RegExp[] = [
   /\bby clicking continue to join or sign in\b/i,
   /\breferrals increase your chances of interviewing\b/i,
   /\bsee who you know\b/i,
-  /\bseniority level\b/i,
-  /\bemployment type\b/i,
-  /\bjob function\b/i,
-  /\bindustries\b/i,
   /\bshow more\b/i,
   /\bshow less\b/i,
 ];
@@ -81,14 +76,9 @@ const STOP_CUES = [
   "people also viewed",
   "similar searches",
   "find curated posts",
-  "language",
   "agree & join linkedin",
   "referrals increase your chances",
   "see who you know",
-  "seniority level",
-  "employment type",
-  "job function",
-  "industries",
   "show less",
   "copyright",
   "brand policy",
@@ -99,6 +89,26 @@ const STOP_CUES = [
   "sign in to create job alert",
   "explore top content on linkedin",
 ];
+
+const EXACT_PAGE_CHROME_LINES = new Set([
+  "language",
+  "seniority level",
+  "employment type",
+  "job function",
+  "industries",
+]);
+
+const SCOPED_DESCRIPTION_NOISE_LINES = new Set([
+  "apply",
+  "save",
+  "sign in",
+  "join now",
+  "show more",
+  "show less",
+  "email or phone",
+  "password",
+  "forgot password?",
+]);
 
 const SECTION_LINE_PATTERN =
   /^(about the job|responsibilities|requirements|qualifications|location|remote|hybrid|on-?site|onsite|job description)$/i;
@@ -145,6 +155,12 @@ function canonicalizeForMatching(value: string): string {
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201c\u201d]/g, "\"")
     .toLowerCase();
+}
+
+function exactLineKey(value: string): string {
+  return canonicalizeForMatching(normalizeLine(value))
+    .replace(/^[\s:;,.!?()[\]{}"'`*_/-]+/, "")
+    .replace(/[\s:;,.!?()[\]{}"'`*_/-]+$/, "");
 }
 
 function escapeRegExp(value: string): string {
@@ -220,6 +236,10 @@ function isNoiseLine(line: string): boolean {
     return false;
   }
 
+  if (EXACT_PAGE_CHROME_LINES.has(exactLineKey(line))) {
+    return true;
+  }
+
   if (NOISE_PATTERNS.some((pattern) => pattern.test(lower))) {
     return true;
   }
@@ -227,11 +247,15 @@ function isNoiseLine(line: string): boolean {
   return /^(jobs|people|learning|about|accessibility|user agreement)$/i.test(line);
 }
 
+function isStopLine(line: string): boolean {
+  return EXACT_PAGE_CHROME_LINES.has(exactLineKey(line)) || STOP_CUES.some((cue) => cueMatches(line, cue));
+}
+
 function sliceRelevantWindow(lines: string[]): string[] {
   const lowered = lines.map((line) => canonicalizeForMatching(line));
   const startIndex = lowered.findIndex((line) => START_CUES.some((cue) => line.includes(cue)));
   const stopIndex = lowered.findIndex((line, index) =>
-    index > Math.max(0, startIndex) && STOP_CUES.some((cue) => cueMatches(line, cue)),
+    index > Math.max(0, startIndex) && isStopLine(line),
   );
 
   if (startIndex === -1 && stopIndex === -1) {
@@ -248,6 +272,15 @@ function postProcessLines(lines: string[]): string[] {
   const expanded = dedupeLines(expandLines(lines));
   const windowed = sliceRelevantWindow(expanded);
   return dedupeLines(windowed.filter((line) => !isNoiseLine(line)));
+}
+
+function isScopedDescriptionNoiseLine(line: string): boolean {
+  return SCOPED_DESCRIPTION_NOISE_LINES.has(exactLineKey(line));
+}
+
+function postProcessLinkedInDescriptionLines(lines: string[]): string[] {
+  const expanded = dedupeLines(expandLines(lines));
+  return dedupeLines(expanded.filter((line) => !isScopedDescriptionNoiseLine(line)));
 }
 
 function linesToText(lines: string[]): string {
@@ -430,7 +463,7 @@ function extractLinkedInDescriptionText(html: string): string {
     const elements = $(selector).toArray();
     for (const element of elements) {
       const innerHtml = $(element).html() ?? "";
-      const text = linesToText(postProcessLines(htmlToLines(innerHtml)));
+      const text = linesToText(postProcessLinkedInDescriptionLines(htmlToLines(innerHtml)));
       if (!isVacancyTextTooShort(text)) {
         return text;
       }
@@ -487,8 +520,7 @@ export function extractVacancyTextFromHtml(html: string): string {
 
 export function fallbackVacancyTextFromHtml(html: string): string {
   const lines = expandLines(htmlToLines(html));
-  const lowered = lines.map((line) => line.toLowerCase());
-  const stopIndex = lowered.findIndex((line) => STOP_CUES.some((cue) => cueMatches(line, cue)));
+  const stopIndex = lines.findIndex((line) => isStopLine(line));
   const sliced = stopIndex >= 0 ? lines.slice(0, stopIndex) : lines;
   return linesToText(dedupeLines(sliced));
 }

@@ -1,5 +1,99 @@
 #!/bin/bash
 
+resolve_self_path() {
+    local source="${BASH_SOURCE[0]}"
+    local dir
+
+    while [ -L "$source" ]; do
+        dir=$(cd -P "$(dirname "$source")" >/dev/null 2>&1 && pwd)
+        source=$(readlink "$source")
+        [[ "$source" != /* ]] && source="$dir/$source"
+    done
+
+    dir=$(cd -P "$(dirname "$source")" >/dev/null 2>&1 && pwd)
+    printf '%s/%s\n' "$dir" "$(basename "$source")"
+}
+
+is_safe_install_path() {
+    local path="$1"
+
+    [ "$(basename "$path")" = "skleika" ] || return 1
+
+    case "$path" in
+        "/usr/local/bin/skleika"|"$HOME/.local/bin/skleika"|"$HOME/bin/skleika")
+            return 0
+            ;;
+    esac
+
+    return 1
+}
+
+remove_installed_file() {
+    local path="$1"
+    local dir
+
+    [ -e "$path" ] || return 0
+    dir=$(dirname "$path")
+
+    if [ -w "$dir" ]; then
+        rm -f "$path"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo rm -f "$path"
+    else
+        echo "Error: Cannot remove '$path'. Try again with sufficient permissions." >&2
+        return 1
+    fi
+}
+
+uninstall_skleika() {
+    local assume_yes="${1:-no}"
+    local self_path
+    local wrapper_path
+    local answer
+
+    self_path=$(resolve_self_path)
+    wrapper_path="$(dirname "$self_path")/skleika.ps1"
+
+    if ! is_safe_install_path "$self_path"; then
+        echo "Error: Refusing to uninstall from '$self_path'." >&2
+        echo "Error: This does not look like an installed global skleika command." >&2
+        exit 1
+    fi
+
+    if [ "$assume_yes" != "yes" ]; then
+        read -r -p "Remove skleika? [y/N] " answer
+        case "$answer" in
+            [yY]|[yY][eE][sS])
+                ;;
+            *)
+                echo "INFO: Uninstall cancelled."
+                exit 0
+                ;;
+        esac
+    fi
+
+    if [ -f "$wrapper_path" ] && grep -q "SKLEIKA_POWERSHELL_WRAPPER" "$wrapper_path"; then
+        remove_installed_file "$wrapper_path" || exit 1
+        echo "INFO: Removed $wrapper_path"
+    fi
+
+    remove_installed_file "$self_path" || exit 1
+    echo "INFO: Removed $self_path"
+    echo "INFO: skleika uninstalled."
+    exit 0
+}
+
+if [ "${1:-}" = "uninstall" ]; then
+    if [ "$#" -eq 1 ]; then
+        uninstall_skleika "no"
+    elif [ "$#" -eq 2 ] && [ "${2:-}" = "--yes" ]; then
+        uninstall_skleika "yes"
+    else
+        echo "Usage: skleika uninstall [--yes]" >&2
+        exit 1
+    fi
+fi
+
 # --- Configuration ---
 # Первый аргумент - это путь, который мы ХОТИМ включить (по умолчанию текущая папка ".")
 INCLUDE_TARGET="${1:-.}"
@@ -54,7 +148,16 @@ main_fallback() {
     cd "$PROJECT_ROOT" || exit 1
 
     if ! command -v rg &> /dev/null; then
-        echo "Error: ripgrep (rg) is not installed. It is the required fallback." >&2
+        cat >&2 <<'EOF'
+Error: ripgrep (rg) is not installed. It is required when skleika runs outside a Git repository.
+
+Install ripgrep:
+  Debian/Ubuntu: sudo apt install ripgrep
+  macOS: brew install ripgrep
+  Windows winget: winget install BurntSushi.ripgrep.MSVC
+  Windows Chocolatey: choco install ripgrep
+  Windows Scoop: scoop install ripgrep
+EOF
         exit 1
     fi
 

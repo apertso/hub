@@ -15,6 +15,11 @@ export type JobParseResult = ParsedJobFields & {
   errorMessage?: string;
 };
 
+export type JobParserConfig = {
+  groqApiKey: string;
+  llmModel?: string;
+};
+
 export class JobParserError extends Error {
   readonly code: string;
 

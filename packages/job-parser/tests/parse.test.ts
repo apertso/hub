@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseJob } from "../src/index.js";
+import { initializeJobParser, parseJob } from "../src/index.js";
+import { resetJobParserForTests } from "../src/parse.js";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const LINKEDIN_URL = "https://www.linkedin.com/jobs/view/4402429247/";
@@ -39,7 +40,7 @@ function groqResponse(body: unknown): Response {
 
 describe("parseJob", () => {
   afterEach(() => {
-    vi.unstubAllEnvs();
+    resetJobParserForTests();
     vi.unstubAllGlobals();
   });
 
@@ -228,7 +229,7 @@ describe("parseJob", () => {
   });
 
   it("falls back from a specific source to Jina and normalizes through Groq", async () => {
-    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    initializeJobParser({ groqApiKey: "test-groq-key" });
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = String(input);
       if (url === "https://boards-api.greenhouse.io/v1/boards/brainrocketltd/jobs/4643018101") {
@@ -267,7 +268,7 @@ describe("parseJob", () => {
   });
 
   it("falls back from Jina to direct fetch", async () => {
-    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    initializeJobParser({ groqApiKey: "test-groq-key" });
     const jobUrl = "https://example.com/jobs/frontend-engineer";
     const directHtml = `
       <html>
@@ -315,7 +316,7 @@ describe("parseJob", () => {
   });
 
   it("adds a warning when Groq returns a section heading as the title", async () => {
-    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    initializeJobParser({ groqApiKey: "test-groq-key" });
     const jobUrl = "https://example.com/jobs/unclear";
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = String(input);
@@ -367,6 +368,6 @@ describe("parseJob", () => {
 
     expect(result.ok).toBe(false);
     expect(result.errorCode).toBe("GROQ_API_KEY_MISSING");
-    expect(result.warnings.some((warning) => warning.includes("GROQ_API_KEY is not configured"))).toBe(true);
+    expect(result.warnings.some((warning) => warning.includes("initializeJobParser"))).toBe(true);
   });
 });

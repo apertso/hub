@@ -4,6 +4,21 @@
 
 - `skleika.sh` - Creates a single-file snapshot of the project's source code.
 
+## job-parser
+
+`@hub/job-parser` requires explicit initialization before `parseJob()`:
+
+```ts
+import { initializeJobParser, parseJob } from "@hub/job-parser";
+
+initializeJobParser({
+  groqApiKey: process.env.GROQ_API_KEY ?? "",
+  llmModel: "llama-3.1-8b-instant", // optional
+});
+
+const result = await parseJob("https://example.com/jobs/frontend-engineer");
+```
+
 ## skleika
 
 `skleika` exports source files into `project_code.txt` in the current working directory.

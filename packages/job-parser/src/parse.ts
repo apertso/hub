@@ -1,9 +1,15 @@
-import { extractJobFieldsWithGroq } from "./llm/groq.js";
+import { extractJobFieldsWithGroq, initializeGroqClient, resetGroqClientForTests } from "./llm/groq.js";
 import { fetchDirectText } from "./sources/direct.js";
 import { fetchGreenhouseJob } from "./sources/greenhouse.js";
 import { fetchJinaText } from "./sources/jina.js";
 import { fetchLinkedInJob } from "./sources/linkedin.js";
-import { JobParserError, type JobParseResult, type JobParseSource, type ParsedJobFields } from "./types.js";
+import {
+  JobParserError,
+  type JobParseResult,
+  type JobParseSource,
+  type JobParserConfig,
+  type ParsedJobFields,
+} from "./types.js";
 import { detectSpecificSource, normalizeJobUrl } from "./utils/url.js";
 import { validateParsedJob } from "./validation/validate.js";
 
@@ -96,6 +102,14 @@ function buildFinalErrorMessage(failures: AttemptFailure[]): string {
   }
 
   return failures.map((failure) => `${failure.source}: ${failure.message}`).join(" | ");
+}
+
+export function initializeJobParser(config: JobParserConfig): void {
+  initializeGroqClient(config);
+}
+
+export function resetJobParserForTests(): void {
+  resetGroqClientForTests();
 }
 
 export async function parseJob(url: string): Promise<JobParseResult> {

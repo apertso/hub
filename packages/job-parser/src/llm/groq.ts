@@ -1,4 +1,4 @@
-import { JobParserError, type ParsedJobFields } from "../types.js";
+import { JobParserError, type JobParserConfig, type ParsedJobFields } from "../types.js";
 import { normalizeGroqJobFields } from "./normalize.js";
 
 const DEFAULT_MODEL = "llama-3.1-8b-instant";
@@ -10,6 +10,8 @@ export type GroqClient = {
   apiKey: string;
   model: string;
 };
+
+let initializedGroqClient: GroqClient | null = null;
 
 type GroqJsonRequest = {
   systemPrompt: string;
@@ -87,16 +89,38 @@ function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
   return undefined;
 }
 
-export function createGroqClientFromEnv(environment: NodeJS.ProcessEnv = process.env): GroqClient {
-  const apiKey = environment.GROQ_API_KEY?.trim();
+function createGroqClient(config: JobParserConfig): GroqClient {
+  const apiKey = config.groqApiKey?.trim();
   if (!apiKey) {
-    throw new JobParserError("GROQ_API_KEY_MISSING", "GROQ_API_KEY is not configured.");
+    throw new JobParserError(
+      "GROQ_API_KEY_MISSING",
+      "Groq API key is not configured. Initialize job-parser with a valid groqApiKey.",
+    );
   }
 
   return {
     apiKey,
-    model: environment.JOB_PARSER_LLM_MODEL?.trim() || DEFAULT_MODEL,
+    model: config.llmModel?.trim() || DEFAULT_MODEL,
   };
+}
+
+export function initializeGroqClient(config: JobParserConfig): void {
+  initializedGroqClient = createGroqClient(config);
+}
+
+export function resetGroqClientForTests(): void {
+  initializedGroqClient = null;
+}
+
+function getInitializedGroqClient(): GroqClient {
+  if (!initializedGroqClient) {
+    throw new JobParserError(
+      "GROQ_API_KEY_MISSING",
+      "Job parser is not initialized. Call initializeJobParser({ groqApiKey, llmModel? }) before parseJob().",
+    );
+  }
+
+  return initializedGroqClient;
 }
 
 async function requestGroqJsonObject<T extends Record<string, unknown>>(
@@ -170,7 +194,7 @@ async function requestGroqJsonObject<T extends Record<string, unknown>>(
 }
 
 export async function extractJobFieldsWithGroq(rawText: string): Promise<ParsedJobFields> {
-  const client = createGroqClientFromEnv();
+  const client = getInitializedGroqClient();
   const truncatedText = rawText.slice(0, TEXT_LIMIT);
   const payload = await requestGroqJsonObject<Record<string, unknown>>(client, {
     temperature: 0,

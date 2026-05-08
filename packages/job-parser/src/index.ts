@@ -1,5 +1,6 @@
-export { parseJob } from "./parse.js";
+export { initializeJobParser, parseJob } from "./parse.js";
 export type {
+  JobParserConfig,
   JobParseResult,
   JobParseSource,
   ParsedJobFields,

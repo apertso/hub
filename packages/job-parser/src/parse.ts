@@ -1,6 +1,7 @@
 import { extractJobFieldsWithGroq, initializeGroqClient, resetGroqClientForTests } from "./llm/groq.js";
 import { fetchDirectText } from "./sources/direct.js";
 import { fetchGreenhouseJob } from "./sources/greenhouse.js";
+import { fetchHhJob } from "./sources/hh.js";
 import { fetchJinaText } from "./sources/jina.js";
 import { fetchLinkedInJob } from "./sources/linkedin.js";
 import {
@@ -67,6 +68,13 @@ function buildAttempts(url: string): ParseAttempt[] {
     attempts.push({
       source: "greenhouse",
       run: () => fetchGreenhouseJob(url),
+    });
+  }
+
+  if (specificSource === "hh") {
+    attempts.push({
+      source: "hh",
+      run: () => fetchHhJob(url),
     });
   }
 

@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initializeJobParser, parseJob } from "../src/index.js";
 import { resetJobParserForTests } from "../src/parse.js";
+import { detectSpecificSource, isHhUrl } from "../src/utils/url.js";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const LINKEDIN_URL = "https://www.linkedin.com/jobs/view/4402429247/";
 const RUBY_LINKEDIN_URL = "https://www.linkedin.com/jobs/view/4411409358";
 const GREENHOUSE_URL = "https://job-boards.eu.greenhouse.io/brainrocketltd/jobs/4643018101";
+const HH_URL = "https://nn.hh.ru/vacancy/133066281";
 
 const LONG_DESCRIPTION = [
   "About the job",
@@ -14,6 +16,37 @@ const LONG_DESCRIPTION = [
   "You will collaborate with product, design, and backend engineers to ship accessible customer features.",
   "Requirements include production TypeScript experience, strong testing habits, and clear communication.",
 ].join("\n");
+
+const HH_DOM_FIXTURE = `
+  <html>
+    <body>
+      <header>Навигация hh.ru</header>
+      <main>
+        <h1 data-qa="vacancy-title">Senior Fullstack Developer (Node.js + React)</h1>
+        <a data-qa="vacancy-company-name">ООО&nbsp;Кидс Аппс</a>
+        <div data-qa="vacancy-description">
+          <p><strong>LogicLike — цифровая платформа для развития логики и мышления</strong> у детей и взрослых.</p>
+          <p>Мы создаем образовательные продукты, которые помогают миллионам пользователей учиться через практику.</p>
+          <p>Сейчас мы ищем Senior Fullstack Developer, который будет развивать продуктовую платформу на Node.js и React.</p>
+          <ul>
+            <li>Проектировать и развивать backend-сервисы на Node.js.</li>
+            <li>Разрабатывать пользовательские интерфейсы на React и TypeScript.</li>
+            <li>Участвовать в архитектурных решениях, ревью кода и улучшении инженерных процессов.</li>
+          </ul>
+          <p>Нам важно, чтобы кандидат умел самостоятельно доводить задачи до результата и бережно относился к качеству продукта.</p>
+        </div>
+        <aside>
+          <div data-qa="vacancy-serp__vacancy_snippet_responsibility">
+            Разрабатывать архитектуру и инфраструктуру для игровых проектов.
+          </div>
+          <div data-qa="vacancy-serp__vacancy_snippet_requirement">
+            Опыт с Unity и игровыми backend-сервисами.
+          </div>
+        </aside>
+      </main>
+    </body>
+  </html>
+`;
 
 function okResponse(body: string, contentType = "text/html; charset=utf-8"): Response {
   return new Response(body, {
@@ -226,6 +259,126 @@ describe("parseJob", () => {
     expect(result.jobDescription).toContain("Requirements:");
     expect(result.jobDescription).not.toContain("Title:");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("detects hh.ru and regional HH subdomains as the HH source", () => {
+    expect(isHhUrl("https://hh.ru/vacancy/133066281")).toBe(true);
+    expect(isHhUrl("https://nn.hh.ru/vacancy/133066281")).toBe(true);
+    expect(isHhUrl("https://example.hh.ru/vacancy/133066281")).toBe(true);
+    expect(isHhUrl("https://not-hh.ru/vacancy/133066281")).toBe(false);
+    expect(detectSpecificSource("https://nn.hh.ru/vacancy/133066281")).toBe("hh");
+  });
+
+  it("extracts HH vacancy fields from scoped data-qa selectors without Groq", async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input) === HH_URL) {
+        return okResponse(HH_DOM_FIXTURE);
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(HH_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("hh");
+    expect(result.positionTitle).toBe("Senior Fullstack Developer (Node.js + React)");
+    expect(result.companyName).toBe("ООО Кидс Аппс");
+    expect(result.jobDescription).toContain("LogicLike — цифровая платформа для развития логики и мышления");
+    expect(result.jobDescription).toContain("- Проектировать и развивать backend-сервисы на Node.js.");
+    expect(result.jobDescription).not.toContain("Разрабатывать архитектуру и инфраструктуру для игровых проектов");
+    expect(result.jobDescription).not.toContain("Опыт с Unity и игровыми backend-сервисами");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back from HH parsing to Jina and keeps fallback warnings", async () => {
+    initializeJobParser({ groqApiKey: "test-groq-key" });
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === HH_URL) {
+        return okResponse(`
+          <h1 data-qa="vacancy-title">Senior Fullstack Developer (Node.js + React)</h1>
+          <a data-qa="vacancy-company-name">ООО&nbsp;Кидс Аппс</a>
+          <div data-qa="vacancy-description">Short.</div>
+        `);
+      }
+      if (url === `https://r.jina.ai/${HH_URL}`) {
+        return okResponse(`
+          Title: Senior Backend Engineer
+          URL Source: ${HH_URL}
+          Markdown Content:
+          # Senior Backend Engineer
+          Example Labs
+          ${LONG_DESCRIPTION}
+        `, "text/plain; charset=utf-8");
+      }
+      if (url === GROQ_URL) {
+        return groqResponse({
+          companyName: "Example Labs",
+          positionTitle: "Senior Backend Engineer",
+          jobDescription: LONG_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(HH_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("jina");
+    expect(result.companyName).toBe("Example Labs");
+    expect(result.positionTitle).toBe("Senior Backend Engineer");
+    expect(result.warnings.some((warning) => warning.includes("hh attempt failed"))).toBe(true);
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      HH_URL,
+      `https://r.jina.ai/${HH_URL}`,
+      GROQ_URL,
+    ]);
+  });
+
+  it("falls back from HH parsing through Jina to direct fetch", async () => {
+    initializeJobParser({ groqApiKey: "test-groq-key" });
+    let hhFetchCount = 0;
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === HH_URL) {
+        hhFetchCount += 1;
+        if (hhFetchCount === 1) {
+          return new Response("", { status: 500 });
+        }
+        return okResponse(`<main>${LONG_DESCRIPTION}</main>`);
+      }
+      if (url === `https://r.jina.ai/${HH_URL}`) {
+        return new Response("", { status: 429 });
+      }
+      if (url === GROQ_URL) {
+        return groqResponse({
+          companyName: "Example Labs",
+          positionTitle: "Frontend Engineer",
+          jobDescription: LONG_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(HH_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("direct");
+    expect(result.companyName).toBe("Example Labs");
+    expect(result.positionTitle).toBe("Frontend Engineer");
+    expect(result.warnings.some((warning) => warning.includes("hh attempt failed"))).toBe(true);
+    expect(result.warnings.some((warning) => warning.includes("jina attempt failed"))).toBe(true);
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      HH_URL,
+      `https://r.jina.ai/${HH_URL}`,
+      HH_URL,
+      GROQ_URL,
+    ]);
   });
 
   it("falls back from a specific source to Jina and normalizes through Groq", async () => {

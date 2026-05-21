@@ -1,4 +1,4 @@
-export type JobParseSource = "linkedin" | "greenhouse" | "jina" | "direct";
+export type JobParseSource = "linkedin" | "greenhouse" | "hh" | "jina" | "direct";
 
 export type ParsedJobFields = {
   companyName: string;

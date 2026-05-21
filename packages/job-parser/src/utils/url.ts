@@ -19,9 +19,22 @@ function isGreenhouseHost(hostname: string): boolean {
   ].includes(hostname.toLowerCase());
 }
 
+export function isHhHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === "hh.ru" || normalized.endsWith(".hh.ru");
+}
+
 export function isLinkedInUrl(url: string): boolean {
   try {
     return isLinkedInHost(new URL(url.trim()).hostname);
+  } catch {
+    return false;
+  }
+}
+
+export function isHhUrl(url: string): boolean {
+  try {
+    return isHhHost(new URL(url.trim()).hostname);
   } catch {
     return false;
   }
@@ -105,6 +118,10 @@ export function parseGreenhouseJobTarget(url: string): GreenhouseJobTarget | nul
 export function detectSpecificSource(url: string): Exclude<JobParseSource, "jina" | "direct"> | null {
   if (isLinkedInUrl(url)) {
     return "linkedin";
+  }
+
+  if (isHhUrl(url)) {
+    return "hh";
   }
 
   if (parseGreenhouseJobTarget(url)) {

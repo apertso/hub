@@ -3,6 +3,8 @@ export type JobParseSource = "linkedin" | "greenhouse" | "hh" | "jina" | "direct
 export type ParsedJobFields = {
   companyName: string;
   positionTitle: string;
+  salary: string;
+  location: string;
   jobDescription: string;
   warnings: string[];
 };

@@ -116,6 +116,8 @@ const SECTION_LINE_PATTERN =
 export type HtmlJobMetadata = {
   companyName: string;
   positionTitle: string;
+  salary: string;
+  location: string;
 };
 
 export function normalizeWhitespace(value: string): string {
@@ -264,7 +266,7 @@ function sliceRelevantWindow(lines: string[]): string[] {
 
   const from = startIndex >= 0 ? Math.max(0, startIndex - 2) : 0;
   const to = stopIndex >= 0 && stopIndex > from ? stopIndex : lines.length;
-  const header = lines.slice(0, Math.min(3, from));
+  const header = lines.slice(0, Math.min(5, from));
   return dedupeLines([...header, ...lines.slice(from, to)]);
 }
 
@@ -371,17 +373,41 @@ function extractOrganizationName(value: unknown): string {
   return "";
 }
 
+function readScalarText(value: unknown): string {
+  if (typeof value === "string") {
+    return normalizeWhitespace(value);
+  }
+
+  if (typeof value === "number") {
+    return String(value);
+  }
+
+  return "";
+}
+
+function uniqueJoin(parts: string[], separator = ", "): string {
+  return [...new Set(parts.map((part) => normalizeWhitespace(part)).filter(Boolean))].join(separator);
+}
+
 function extractJobLocation(value: unknown): string {
+  if (typeof value === "string") {
+    return normalizeWhitespace(value);
+  }
+
+  if (Array.isArray(value)) {
+    return uniqueJoin(value.map((item) => extractJobLocation(item)));
+  }
+
   if (!value || typeof value !== "object") {
     return "";
   }
 
-  const item = Array.isArray(value) ? value[0] : value;
-  if (!item || typeof item !== "object") {
-    return "";
+  const record = value as Record<string, unknown>;
+  const namedLocation = readScalarText(record.name);
+  if (namedLocation) {
+    return namedLocation;
   }
 
-  const record = item as Record<string, unknown>;
   const address = typeof record.address === "object" && record.address
     ? record.address as Record<string, unknown>
     : record;
@@ -389,10 +415,51 @@ function extractJobLocation(value: unknown): string {
     .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
     .map((part) => normalizeWhitespace(part));
 
-  return [...new Set(parts)].join(", ");
+  return uniqueJoin(parts);
 }
 
-function extractJobPostingText(html: string): string {
+function extractQuantitativeSalary(value: Record<string, unknown>, currency: string): string {
+  const unit = readScalarText(value.unitText);
+  const min = readScalarText(value.minValue);
+  const max = readScalarText(value.maxValue);
+  const exact = readScalarText(value.value);
+  const amount = min && max ? `${min} - ${max}` : exact || min || max;
+
+  if (!amount) {
+    return "";
+  }
+
+  return normalizeWhitespace(`${currency ? `${currency} ` : ""}${amount}${unit ? ` / ${unit}` : ""}`);
+}
+
+function extractJobSalary(value: unknown, inheritedCurrency = ""): string {
+  const scalar = readScalarText(value);
+  if (scalar) {
+    return scalar;
+  }
+
+  if (Array.isArray(value)) {
+    return uniqueJoin(value.map((item) => extractJobSalary(item, inheritedCurrency)), " | ");
+  }
+
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+
+  const record = value as Record<string, unknown>;
+  const currency = readScalarText(record.currency) || inheritedCurrency;
+
+  if (record.value && typeof record.value === "object") {
+    const nested = extractJobSalary(record.value, currency);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return extractQuantitativeSalary(record, currency);
+}
+
+function collectJobPostingsFromHtml(html: string): Record<string, unknown>[] {
   const $ = cheerio.load(html);
   const postings: Record<string, unknown>[] = [];
 
@@ -409,15 +476,24 @@ function extractJobPostingText(html: string): string {
     }
   });
 
+  return postings;
+}
+
+function selectBestJobPosting(html: string): Record<string, unknown> | null {
+  const postings = collectJobPostingsFromHtml(html);
   if (postings.length === 0) {
-    return "";
+    return null;
   }
 
-  const best = postings.sort((a, b) => {
+  return postings.sort((a, b) => {
     const aLength = typeof a.description === "string" ? a.description.length : 0;
     const bLength = typeof b.description === "string" ? b.description.length : 0;
     return bLength - aLength;
-  })[0];
+  })[0] ?? null;
+}
+
+function extractJobPostingText(html: string): string {
+  const best = selectBestJobPosting(html);
   if (!best) {
     return "";
   }
@@ -425,10 +501,12 @@ function extractJobPostingText(html: string): string {
   const title = typeof best.title === "string" ? normalizeWhitespace(best.title) : "";
   const company = extractOrganizationName(best.hiringOrganization);
   const location = extractJobLocation(best.jobLocation ?? best.applicantLocationRequirements);
+  const salary = extractJobSalary(best.baseSalary ?? best.estimatedSalary);
   const lines = [
     title ? `Title: ${title}` : "",
     company ? `Company: ${company}` : "",
     location ? `Location: ${location}` : "",
+    salary ? `Salary: ${salary}` : "",
     typeof best.employmentType === "string" ? `Employment type: ${normalizeWhitespace(best.employmentType)}` : "",
     typeof best.description === "string" ? `Description:\n${stripTags(best.description)}` : "",
     typeof best.responsibilities === "string" ? `Responsibilities:\n${stripTags(best.responsibilities)}` : "",
@@ -490,6 +568,54 @@ function cleanTitleCandidate(value: string): string {
   return normalizeWhitespace(decodeHtmlEntities(value).replace(/\s*\|\s*linkedin\s*$/i, ""));
 }
 
+function readFirstSelectorText(
+  $: cheerio.CheerioAPI,
+  selectors: string[],
+  accepts: (value: string) => boolean = Boolean,
+): string {
+  for (const selector of selectors) {
+    for (const element of $(selector).toArray()) {
+      const value = normalizeWhitespace($(element).text());
+      if (accepts(value)) {
+        return value;
+      }
+    }
+  }
+
+  return "";
+}
+
+function looksLikeSalary(value: string): boolean {
+  return value.length <= 220 &&
+    /(\$|€|£|₽|руб|usd|eur|gbp|cad|aud|salary|compensation|base pay|pay range|\d+\s*k\b|\d[\d\s,.]*(?:-|–|to)\s*\d|\d+\s*(?:per|\/)\s*(?:year|month|hour))/i.test(value);
+}
+
+function looksLikeLocation(value: string): boolean {
+  return value.length <= 180 &&
+    !looksLikeSalary(value) &&
+    !/\b(applicants?|ago|posted|reposted|promoted|views?)\b/i.test(value);
+}
+
+function extractPrefixedLine(text: string, labels: string[]): string {
+  for (const label of labels) {
+    const match = text.match(new RegExp(`^${label}:\\s*(.+)$`, "im"));
+    const value = normalizeWhitespace(match?.[1] ?? "");
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
+export function extractSalaryFromText(text: string): string {
+  return extractPrefixedLine(text, ["Salary", "Compensation", "Pay", "Base salary", "Base pay", "Pay range"]);
+}
+
+export function extractLocationFromText(text: string): string {
+  return extractPrefixedLine(text, ["Location", "Job location", "Work location"]);
+}
+
 export function sanitizeVacancyText(value: string): string {
   const cleaned = linesToText(postProcessLines(splitCleanLines(stripTags(value))));
   if (cleaned.length > 0) {
@@ -540,10 +666,33 @@ export function stripJinaEnvelope(text: string): string {
 
 export function extractCompanyRoleFromHtml(html: string): HtmlJobMetadata {
   const $ = cheerio.load(html);
+  const structuredJob = selectBestJobPosting(html);
+  const structuredTitle = readScalarText(structuredJob?.title);
+  const structuredCompany = extractOrganizationName(structuredJob?.hiringOrganization);
+  const structuredLocation = extractJobLocation(
+    structuredJob?.jobLocation ?? structuredJob?.applicantLocationRequirements,
+  );
+  const structuredSalary = extractJobSalary(structuredJob?.baseSalary ?? structuredJob?.estimatedSalary);
   const topCardRole = normalizeWhitespace($(".topcard__title, .top-card-layout__title").first().text());
   const topCardCompany = normalizeWhitespace($(".topcard__org-name-link").first().text());
+  const topCardLocation = readFirstSelectorText($, [
+    ".topcard__flavor--bullet",
+    ".job-search-card__location",
+    ".sub-nav-cta__meta-text",
+  ], looksLikeLocation);
+  const topCardSalary = readFirstSelectorText($, [
+    ".compensation__salary",
+    ".salary",
+    "[class*='salary']",
+    "[class*='compensation']",
+  ], looksLikeSalary);
   if (topCardCompany && topCardRole) {
-    return { companyName: topCardCompany, positionTitle: topCardRole };
+    return {
+      companyName: topCardCompany,
+      positionTitle: topCardRole,
+      salary: topCardSalary || structuredSalary,
+      location: topCardLocation || structuredLocation,
+    };
   }
 
   const ogTitle = readMetaContent($, "og:title");
@@ -564,13 +713,22 @@ export function extractCompanyRoleFromHtml(html: string): HtmlJobMetadata {
       .replace(/\s+-\s+(remote(?:\s+friendly)?|hybrid|on-?site|onsite)\b.*$/i, "")
       .trim();
     if (companyName && positionTitle) {
-      return { companyName, positionTitle };
+      return {
+        companyName,
+        positionTitle,
+        salary: topCardSalary || structuredSalary,
+        location: topCardLocation || structuredLocation,
+      };
     }
   }
 
   return {
-    companyName: readMetaContent($, "og:site_name"),
-    positionTitle: cleanTitleCandidate(ogTitle || titleTag || normalizeWhitespace($("h1").first().text())),
+    companyName: topCardCompany || structuredCompany || readMetaContent($, "og:site_name"),
+    positionTitle: topCardRole ||
+      structuredTitle ||
+      cleanTitleCandidate(ogTitle || titleTag || normalizeWhitespace($("h1").first().text())),
+    salary: topCardSalary || structuredSalary,
+    location: topCardLocation || structuredLocation,
   };
 }
 

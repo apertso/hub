@@ -2,6 +2,8 @@ import { JobParserError, type ParsedJobFields } from "../types.js";
 import {
   extractCompanyFromText,
   extractCompanyRoleFromHtml,
+  extractLocationFromText,
+  extractSalaryFromText,
   extractTitleFromText,
   extractVacancyTextFromHtml,
   fallbackVacancyTextFromHtml,
@@ -51,6 +53,8 @@ export async function fetchLinkedInJob(url: string): Promise<ParsedJobFields> {
   return {
     companyName: metadata.companyName || extractCompanyFromText(text),
     positionTitle: metadata.positionTitle || extractTitleFromText(text),
+    salary: metadata.salary || extractSalaryFromText(text),
+    location: metadata.location || extractLocationFromText(text),
     jobDescription: text,
     warnings: [],
   };

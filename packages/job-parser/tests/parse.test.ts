@@ -24,6 +24,8 @@ const HH_DOM_FIXTURE = `
       <main>
         <h1 data-qa="vacancy-title">Senior Fullstack Developer (Node.js + React)</h1>
         <a data-qa="vacancy-company-name">ООО&nbsp;Кидс Аппс</a>
+        <span data-qa="vacancy-salary">от 300 000 ₽ на руки</span>
+        <p data-qa="vacancy-view-location">Нижний Новгород</p>
         <div data-qa="vacancy-description">
           <p><strong>LogicLike — цифровая платформа для развития логики и мышления</strong> у детей и взрослых.</p>
           <p>Мы создаем образовательные продукты, которые помогают миллионам пользователей учиться через практику.</p>
@@ -83,6 +85,8 @@ describe("parseJob", () => {
         <body>
           <h2 class="top-card-layout__title topcard__title">Frontend Developer</h2>
           <a class="topcard__org-name-link">Synthesia</a>
+          <span class="topcard__flavor topcard__flavor--bullet">London, England, United Kingdom</span>
+          <div class="compensation__salary">Base pay range $120,000/yr - $150,000/yr</div>
           <section class="core-section-container my-3 description">
             <div class="description__text description__text--rich">
               <section class="show-more-less-html">
@@ -113,6 +117,8 @@ describe("parseJob", () => {
     expect(result.source).toBe("linkedin");
     expect(result.companyName).toBe("Synthesia");
     expect(result.positionTitle).toBe("Frontend Developer");
+    expect(result.location).toBe("London, England, United Kingdom");
+    expect(result.salary).toBe("Base pay range $120,000/yr - $150,000/yr");
     expect(result.jobDescription).toContain("About the job");
     expect(result.jobDescription).not.toContain("top-card-layout");
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -234,6 +240,10 @@ describe("parseJob", () => {
     const greenhousePayload = {
       title: "Senior Node.js Developer",
       company_name: "BrainRocket",
+      location: { name: "Limassol, Cyprus" },
+      metadata: [
+        { name: "Salary range", value: "€70,000 - €90,000" },
+      ],
       content: [
         "&lt;div&gt;&lt;p&gt;BrainRocket is a global company creating end-to-end tech products for fintech clients.&lt;/p&gt;&lt;/div&gt;",
         "&lt;div&gt;&lt;p&gt;We are looking for a skilled Senior Node.js Developer to join our product engineering team.&lt;/p&gt;",
@@ -255,6 +265,8 @@ describe("parseJob", () => {
     expect(result.source).toBe("greenhouse");
     expect(result.companyName).toBe("BrainRocket");
     expect(result.positionTitle).toBe("Senior Node.js Developer");
+    expect(result.location).toBe("Limassol, Cyprus");
+    expect(result.salary).toBe("€70,000 - €90,000");
     expect(result.jobDescription).toContain("BrainRocket is a global company");
     expect(result.jobDescription).toContain("Requirements:");
     expect(result.jobDescription).not.toContain("Title:");
@@ -284,6 +296,8 @@ describe("parseJob", () => {
     expect(result.source).toBe("hh");
     expect(result.positionTitle).toBe("Senior Fullstack Developer (Node.js + React)");
     expect(result.companyName).toBe("ООО Кидс Аппс");
+    expect(result.salary).toBe("от 300 000 ₽ на руки");
+    expect(result.location).toBe("Нижний Новгород");
     expect(result.jobDescription).toContain("LogicLike — цифровая платформа для развития логики и мышления");
     expect(result.jobDescription).toContain("- Проектировать и развивать backend-сервисы на Node.js.");
     expect(result.jobDescription).not.toContain("Разрабатывать архитектуру и инфраструктуру для игровых проектов");
@@ -316,6 +330,8 @@ describe("parseJob", () => {
         return groqResponse({
           companyName: "Example Labs",
           positionTitle: "Senior Backend Engineer",
+          salary: "$140,000 - $180,000",
+          location: "Remote, United States",
           jobDescription: LONG_DESCRIPTION,
           warnings: [],
         });
@@ -330,6 +346,8 @@ describe("parseJob", () => {
     expect(result.source).toBe("jina");
     expect(result.companyName).toBe("Example Labs");
     expect(result.positionTitle).toBe("Senior Backend Engineer");
+    expect(result.salary).toBe("$140,000 - $180,000");
+    expect(result.location).toBe("Remote, United States");
     expect(result.warnings.some((warning) => warning.includes("hh attempt failed"))).toBe(true);
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
       HH_URL,
@@ -432,6 +450,25 @@ describe("parseJob", () => {
               "@type": "JobPosting",
               "title": "Frontend Engineer",
               "hiringOrganization": { "name": "Example Labs" },
+              "jobLocation": {
+                "@type": "Place",
+                "address": {
+                  "@type": "PostalAddress",
+                  "addressLocality": "Austin",
+                  "addressRegion": "TX",
+                  "addressCountry": "US"
+                }
+              },
+              "baseSalary": {
+                "@type": "MonetaryAmount",
+                "currency": "USD",
+                "value": {
+                  "@type": "QuantitativeValue",
+                  "minValue": 140000,
+                  "maxValue": 180000,
+                  "unitText": "YEAR"
+                }
+              },
               "description": "<p>${LONG_DESCRIPTION.replace(/\n/g, " ")}</p>"
             }
           </script>
@@ -439,7 +476,7 @@ describe("parseJob", () => {
         <body></body>
       </html>
     `;
-    const fetchMock = vi.fn(async (input: unknown) => {
+    const fetchMock = vi.fn(async (input: unknown, _init?: RequestInit) => {
       const url = String(input);
       if (url === `https://r.jina.ai/${jobUrl}`) {
         return new Response("", { status: 429 });
@@ -451,6 +488,8 @@ describe("parseJob", () => {
         return groqResponse({
           companyName: "Example Labs",
           positionTitle: "Frontend Engineer",
+          salary: "USD 140000 - 180000 / YEAR",
+          location: "Austin, TX, US",
           jobDescription: LONG_DESCRIPTION,
           warnings: [],
         });
@@ -465,6 +504,15 @@ describe("parseJob", () => {
     expect(result.source).toBe("direct");
     expect(result.companyName).toBe("Example Labs");
     expect(result.positionTitle).toBe("Frontend Engineer");
+    expect(result.salary).toBe("USD 140000 - 180000 / YEAR");
+    expect(result.location).toBe("Austin, TX, US");
+    const groqCall = fetchMock.mock.calls.find(([input]) => String(input) === GROQ_URL);
+    expect(groqCall?.[1]?.body).toEqual(expect.any(String));
+    const groqBody = JSON.parse(groqCall?.[1]?.body as string) as {
+      messages: Array<{ content: string }>;
+    };
+    expect(groqBody.messages[1]?.content).toContain("Salary: USD 140000 - 180000 / YEAR");
+    expect(groqBody.messages[1]?.content).toContain("Location: Austin, TX, US");
     expect(result.warnings.some((warning) => warning.includes("jina attempt failed"))).toBe(true);
   });
 
@@ -502,6 +550,8 @@ describe("parseJob", () => {
     expect(result.errorCode).toBe("INVALID_URL");
     expect(result.source).toBe("direct");
     expect(result.companyName).toBe("");
+    expect(result.salary).toBe("");
+    expect(result.location).toBe("");
   });
 
   it("returns a Groq configuration error for generic URLs when the API key is missing", async () => {

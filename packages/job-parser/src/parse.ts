@@ -45,6 +45,8 @@ function emptyResult(
     url: rawUrl,
     companyName: "",
     positionTitle: "",
+    salary: "",
+    location: "",
     jobDescription: "",
     source,
     warnings,
@@ -150,6 +152,8 @@ export async function parseJob(url: string): Promise<JobParseResult> {
         source: attempt.source,
         companyName: fields.companyName,
         positionTitle: fields.positionTitle,
+        salary: fields.salary,
+        location: fields.location,
         jobDescription: fields.jobDescription,
         warnings: [...new Set([...fields.warnings, ...validation.warnings, ...fallbackWarnings(failures)])],
       };

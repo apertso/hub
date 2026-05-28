@@ -18,6 +18,9 @@ function readString(record: Record<string, unknown>, keys: string[]): string {
         return normalized;
       }
     }
+    if (typeof value === "number") {
+      return String(value);
+    }
   }
   return "";
 }
@@ -62,6 +65,8 @@ export function normalizeGroqJobFields(payload: unknown, rawText: string): Parse
   return {
     companyName: readString(record, ["companyName", "company", "company_name", "employer"]),
     positionTitle: readString(record, ["positionTitle", "title", "position_title", "jobTitle", "job_title", "role"]),
+    salary: readString(record, ["salary", "compensation", "pay", "baseSalary", "base_salary", "salaryRange", "salary_range"]),
+    location: readString(record, ["location", "jobLocation", "job_location", "workLocation", "work_location"]),
     jobDescription: description.value,
     warnings: [...new Set(warnings)],
   };

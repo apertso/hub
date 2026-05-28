@@ -40,6 +40,17 @@ function readSelectorText($: cheerio.CheerioAPI, selector: string): string {
   return normalizeWhitespace(decodeHtmlEntities($(selector).first().text()));
 }
 
+function readFirstSelectorText($: cheerio.CheerioAPI, selectors: string[]): string {
+  for (const selector of selectors) {
+    const value = readSelectorText($, selector);
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
 function readDescription($: cheerio.CheerioAPI): string {
   const description = $('[data-qa="vacancy-description"]').first();
   if (description.length === 0) {
@@ -69,6 +80,15 @@ export async function fetchHhJob(url: string): Promise<ParsedJobFields> {
   return {
     companyName: readSelectorText($, '[data-qa="vacancy-company-name"]'),
     positionTitle: readSelectorText($, '[data-qa="vacancy-title"]'),
+    salary: readFirstSelectorText($, [
+      '[data-qa="vacancy-salary"]',
+      '[data-qa="vacancy-compensation"]',
+    ]),
+    location: readFirstSelectorText($, [
+      '[data-qa="vacancy-view-location"]',
+      '[data-qa="vacancy-view-raw-address"]',
+      '[data-qa="vacancy-address"]',
+    ]),
     jobDescription,
     warnings: [],
   };

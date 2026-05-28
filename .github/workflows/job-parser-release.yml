@@ -74,8 +74,9 @@ jobs:
             exit 1
           fi
 
-          tar -tzf "${tarball}" | grep -qx "package/dist/index.js"
-          tar -tzf "${tarball}" | grep -qx "package/dist/index.d.ts"
+          tar -tzf "${tarball}" > tarball-contents.txt
+          grep -qx "package/dist/index.js" tarball-contents.txt
+          grep -qx "package/dist/index.d.ts" tarball-contents.txt
 
           echo "path=${tarball}" >> "${GITHUB_OUTPUT}"
 

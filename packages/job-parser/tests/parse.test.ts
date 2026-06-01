@@ -17,6 +17,23 @@ const LONG_DESCRIPTION = [
   "Requirements include production TypeScript experience, strong testing habits, and clear communication.",
 ].join("\n");
 
+const SECTIONED_DESCRIPTION = [
+  "Senior Frontend Engineer",
+  "Example Labs",
+  "About the role",
+  "Example Labs builds reliable product surfaces for enterprise workflow teams.",
+  "This role focuses on customer-facing dashboards, collaboration features, and accessible workflow tools.",
+  "Key Responsibilities",
+  "- Build accessible React and TypeScript interfaces for customer-facing dashboards.",
+  "- Partner with product, design, and backend engineers to ship reliable product workflows.",
+  "- Improve test coverage, frontend architecture, and performance for high-traffic features.",
+  "Required experience",
+  "- 5+ years building production web applications with React and TypeScript.",
+  "- Strong testing habits, product judgment, and written communication.",
+  "Benefits",
+  "- Remote-first team with health coverage, learning budget, and flexible working hours.",
+].join("\n");
+
 const HH_DOM_FIXTURE = `
   <html>
     <body>
@@ -513,7 +530,48 @@ describe("parseJob", () => {
     };
     expect(groqBody.messages[1]?.content).toContain("Salary: USD 140000 - 180000 / YEAR");
     expect(groqBody.messages[1]?.content).toContain("Location: Austin, TX, US");
+    expect(groqBody.messages[1]?.content).toContain("Include intro/context");
+    expect(groqBody.messages[1]?.content).toContain("do not summarize");
+    expect(groqBody.messages[1]?.content).toContain("Do not return only responsibilities");
     expect(result.warnings.some((warning) => warning.includes("jina attempt failed"))).toBe(true);
+  });
+
+  it("falls back to cleaned source text when Groq returns only one description section", async () => {
+    initializeJobParser({ groqApiKey: "test-groq-key" });
+    const jobUrl = "https://example.com/jobs/section-only";
+    const partialGroqDescription = [
+      "Key Responsibilities",
+      "- Build accessible React and TypeScript interfaces for customer-facing dashboards.",
+      "- Partner with product, design, and backend engineers to ship reliable product workflows.",
+    ].join("\n");
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === `https://r.jina.ai/${jobUrl}`) {
+        return okResponse(SECTIONED_DESCRIPTION, "text/plain");
+      }
+      if (url === GROQ_URL) {
+        return groqResponse({
+          companyName: "Example Labs",
+          positionTitle: "Senior Frontend Engineer",
+          salary: "",
+          location: "Remote",
+          jobDescription: partialGroqDescription,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("jina");
+    expect(result.jobDescription).toContain("About the role");
+    expect(result.jobDescription).toContain("Required experience");
+    expect(result.jobDescription).toContain("Benefits");
+    expect(result.jobDescription).not.toBe(partialGroqDescription);
+    expect(result.warnings).toContain("Groq returned incomplete jobDescription; using cleaned source text.");
   });
 
   it("adds a warning when Groq returns a section heading as the title", async () => {

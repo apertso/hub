@@ -7,6 +7,7 @@ app.SetFont("s10")
 app.Add("Text",, "Resume actions")
 app.Add("Button", "w300", "Update resume.pdf").OnEvent("Click", MakeResume)
 app.Add("Button", "w300", "Open Downloads").OnEvent("Click", OpenDownloads)
+app.Add("Button", "w300", "Copy cover letter prompt").OnEvent("Click", CopyCoverLetterPrompt)
 
 app.Show()
 
@@ -43,4 +44,8 @@ MakeResume(*) {
 OpenDownloads(*) {
     downloads := EnvGet("USERPROFILE") "\Downloads"
     Run downloads
+}
+
+CopyCoverLetterPrompt(*) {
+    A_Clipboard := "Give me a cover letter, but not in JSON. Use straight apostrophes."
 }

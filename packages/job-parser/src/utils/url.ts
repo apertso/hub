@@ -5,6 +5,12 @@ export type GreenhouseJobTarget = {
   jobId: string;
 };
 
+export type LeverJobTarget = {
+  site: string;
+  postingId: string;
+  apiBase: string;
+};
+
 function isLinkedInHost(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
   return normalized === "linkedin.com" || normalized.endsWith(".linkedin.com");
@@ -18,6 +24,12 @@ function isGreenhouseHost(hostname: string): boolean {
     "job-boards.eu.greenhouse.io",
   ].includes(hostname.toLowerCase());
 }
+
+function isLeverHost(hostname: string): boolean {
+  return ["jobs.lever.co", "jobs.eu.lever.co"].includes(hostname.toLowerCase());
+}
+
+const LEVER_POSTING_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function isHhHost(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
@@ -85,6 +97,50 @@ export function extractLinkedInJobId(url: string): string | null {
   return null;
 }
 
+export function isLeverUrl(url: string): boolean {
+  try {
+    return isLeverHost(new URL(url.trim()).hostname);
+  } catch {
+    return false;
+  }
+}
+
+export function parseLeverJobTarget(url: string): LeverJobTarget | null {
+  try {
+    const parsed = new URL(url);
+    if (!isLeverHost(parsed.hostname)) {
+      return null;
+    }
+
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    if (parts.length < 2) {
+      return null;
+    }
+
+    const site = parts[0]?.trim();
+    let postingId = parts[1]?.trim();
+    if (!site || !postingId) {
+      return null;
+    }
+
+    if (parts[2]?.toLowerCase() === "apply") {
+      postingId = parts[1]?.trim() ?? "";
+    }
+
+    if (!LEVER_POSTING_ID_PATTERN.test(postingId)) {
+      return null;
+    }
+
+    const apiBase = parsed.hostname.toLowerCase() === "jobs.eu.lever.co"
+      ? "https://api.eu.lever.co"
+      : "https://api.lever.co";
+
+    return { site, postingId, apiBase };
+  } catch {
+    return null;
+  }
+}
+
 export function parseGreenhouseJobTarget(url: string): GreenhouseJobTarget | null {
   try {
     const parsed = new URL(url);
@@ -126,6 +182,10 @@ export function detectSpecificSource(url: string): Exclude<JobParseSource, "jina
 
   if (parseGreenhouseJobTarget(url)) {
     return "greenhouse";
+  }
+
+  if (parseLeverJobTarget(url)) {
+    return "lever";
   }
 
   return null;

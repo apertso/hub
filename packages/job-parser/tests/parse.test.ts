@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initializeJobParser, parseJob } from "../src/index.js";
 import { resetJobParserForTests } from "../src/parse.js";
-import { detectSpecificSource, isHhUrl } from "../src/utils/url.js";
+import { detectSpecificSource, isHhUrl, isLeverUrl } from "../src/utils/url.js";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const LINKEDIN_URL = "https://www.linkedin.com/jobs/view/4402429247/";
 const RUBY_LINKEDIN_URL = "https://www.linkedin.com/jobs/view/4411409358";
 const GREENHOUSE_URL = "https://job-boards.eu.greenhouse.io/brainrocketltd/jobs/4643018101";
+const LEVER_URL = "https://jobs.lever.co/binance/8a4660a3-28de-41e6-bcaf-ef404c481338";
 const HH_URL = "https://nn.hh.ru/vacancy/133066281";
 
 const LONG_DESCRIPTION = [
@@ -290,6 +291,62 @@ describe("parseJob", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("detects lever.co job URLs as the Lever source", () => {
+    expect(isLeverUrl(LEVER_URL)).toBe(true);
+    expect(isLeverUrl("https://jobs.eu.lever.co/binance/8a4660a3-28de-41e6-bcaf-ef404c481338")).toBe(true);
+    expect(isLeverUrl("https://jobs.lever.co/binance/8a4660a3-28de-41e6-bcaf-ef404c481338/apply")).toBe(true);
+    expect(isLeverUrl("https://example.com/jobs/123")).toBe(false);
+    expect(detectSpecificSource(LEVER_URL)).toBe("lever");
+  });
+
+  it("uses the Lever postings API before generic fallbacks", async () => {
+    const leverPayload = {
+      text: "Pioneer Talent Program - AI Agent Developer",
+      workplaceType: "remote",
+      categories: {
+        location: "Asia",
+        allLocations: ["Asia", "Hong Kong", "Taiwan, Taipei", "UAE, Dubai"],
+      },
+      openingPlain: [
+        "Binance is a leading global blockchain ecosystem behind the world's largest cryptocurrency exchange by trading volume and registered users.",
+        "We are trusted by over 230 million people in 100+ countries for our industry-leading security, user fund transparency, trading engine speed, deep liquidity, and an unmatched portfolio of digital-asset products.",
+        "Binance offerings range from trading and finance to education, research, payments, institutional services, Web3 features, and more.",
+      ].join(" "),
+      lists: [
+        {
+          text: "About the Role",
+          content: "<p>We are looking for an AI Agent Engineer to join our team as part of Tech Seeds 2026.</p><p>Design and build AI agent workflows and LLM-powered systems for real business use cases.</p>",
+        },
+        {
+          text: "What We're Looking For",
+          content: "<ul><li>Strong programming fundamentals in Java or Python.</li><li>Strong curiosity about LLMs, AI agents, tool use, retrieval, evaluation, and production AI systems.</li></ul>",
+        },
+      ],
+      additionalPlain: "Competitive salary and company benefits. Work-from-home arrangement.",
+    };
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input) === "https://api.lever.co/v0/postings/binance/8a4660a3-28de-41e6-bcaf-ef404c481338?mode=json") {
+        return okJson(leverPayload);
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(LEVER_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("lever");
+    expect(result.companyName).toBe("Binance");
+    expect(result.positionTitle).toBe("Pioneer Talent Program - AI Agent Developer");
+    expect(result.location).toBe("Asia / Hong Kong / Taiwan, Taipei / UAE, Dubai / Remote");
+    expect(result.jobDescription).toContain("Binance is a leading global blockchain ecosystem");
+    expect(result.jobDescription).toContain("About the Role");
+    expect(result.jobDescription).toContain("AI Agent Engineer");
+    expect(result.jobDescription).toContain("What We're Looking For");
+    expect(result.jobDescription).toContain("Competitive salary and company benefits");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("detects hh.ru and regional HH subdomains as the HH source", () => {
     expect(isHhUrl("https://hh.ru/vacancy/133066281")).toBe(true);
     expect(isHhUrl("https://nn.hh.ru/vacancy/133066281")).toBe(true);
@@ -453,6 +510,45 @@ describe("parseJob", () => {
     expect(result.positionTitle).toBe("Senior Backend Engineer");
     expect(result.warnings.some((warning) => warning.includes("greenhouse attempt failed"))).toBe(true);
     expect(fetchMock).not.toHaveBeenCalledWith(GREENHOUSE_URL, expect.anything());
+  });
+
+  it("falls back from Lever to Jina and normalizes through Groq", async () => {
+    initializeJobParser({ groqApiKey: "test-groq-key" });
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === "https://api.lever.co/v0/postings/binance/8a4660a3-28de-41e6-bcaf-ef404c481338?mode=json") {
+        return new Response("", { status: 500 });
+      }
+      if (url === `https://r.jina.ai/${LEVER_URL}`) {
+        return okResponse(`
+          Title: Pioneer Talent Program - AI Agent Developer
+          URL Source: ${LEVER_URL}
+          Markdown Content:
+          # Pioneer Talent Program - AI Agent Developer
+          Binance
+          ${LONG_DESCRIPTION}
+        `, "text/plain; charset=utf-8");
+      }
+      if (url === GROQ_URL) {
+        return groqResponse({
+          companyName: "Binance",
+          positionTitle: "Pioneer Talent Program - AI Agent Developer",
+          jobDescription: LONG_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(LEVER_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("jina");
+    expect(result.companyName).toBe("Binance");
+    expect(result.positionTitle).toBe("Pioneer Talent Program - AI Agent Developer");
+    expect(result.warnings.some((warning) => warning.includes("lever attempt failed"))).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalledWith(LEVER_URL, expect.anything());
   });
 
   it("falls back from Jina to direct fetch", async () => {

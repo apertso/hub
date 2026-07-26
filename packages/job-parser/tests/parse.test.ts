@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { initializeJobParser, parseJob } from "../src/index.js";
+import { initializeJobParser, isJobParseSource, JOB_PARSE_SOURCES, parseJob } from "../src/index.js";
 import { resetJobParserForTests } from "../src/parse.js";
 import { detectSpecificSource, isHhUrl, isLeverUrl } from "../src/utils/url.js";
 
@@ -95,6 +95,13 @@ describe("parseJob", () => {
   afterEach(() => {
     resetJobParserForTests();
     vi.unstubAllGlobals();
+  });
+
+  it("exports JOB_PARSE_SOURCES and isJobParseSource for consumers", () => {
+    expect(JOB_PARSE_SOURCES).toEqual(["linkedin", "greenhouse", "hh", "lever", "jina", "direct"]);
+    expect(isJobParseSource("lever")).toBe(true);
+    expect(isJobParseSource("manual")).toBe(false);
+    expect(isJobParseSource(null)).toBe(false);
   });
 
   it("extracts LinkedIn guest title, company, and description without Groq", async () => {

@@ -1,4 +1,17 @@
-export type JobParseSource = "linkedin" | "greenhouse" | "hh" | "lever" | "jina" | "direct";
+export const JOB_PARSE_SOURCES = [
+  "linkedin",
+  "greenhouse",
+  "hh",
+  "lever",
+  "jina",
+  "direct",
+] as const;
+
+export type JobParseSource = (typeof JOB_PARSE_SOURCES)[number];
+
+export function isJobParseSource(value: unknown): value is JobParseSource {
+  return typeof value === "string" && (JOB_PARSE_SOURCES as readonly string[]).includes(value);
+}
 
 export type ParsedJobFields = {
   companyName: string;

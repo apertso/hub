@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initializeJobParser, isJobParseSource, JOB_PARSE_SOURCES, parseJob } from "../src/index.js";
 import { resetJobParserForTests } from "../src/parse.js";
-import { detectSpecificSource, isHhUrl, isLeverUrl } from "../src/utils/url.js";
+import { detectSpecificSource, isHhUrl, isLeverUrl, isTeamtailorUrl } from "../src/utils/url.js";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const LINKEDIN_URL = "https://www.linkedin.com/jobs/view/4402429247/";
@@ -9,6 +9,7 @@ const RUBY_LINKEDIN_URL = "https://www.linkedin.com/jobs/view/4411409358";
 const GREENHOUSE_URL = "https://job-boards.eu.greenhouse.io/brainrocketltd/jobs/4643018101";
 const LEVER_URL = "https://jobs.lever.co/binance/8a4660a3-28de-41e6-bcaf-ef404c481338";
 const HH_URL = "https://nn.hh.ru/vacancy/133066281";
+const TEAMTAILOR_URL = "https://interventure.teamtailor.com/jobs/7674883-senior-ai-native-fullstack-engineer-ringier-team";
 
 const LONG_DESCRIPTION = [
   "About the job",
@@ -68,6 +69,80 @@ const HH_DOM_FIXTURE = `
   </html>
 `;
 
+const TEAMTAILOR_DOM_FIXTURE = `
+  <html>
+    <head>
+      <title>Senior AI-Native Fullstack Engineer - Ringier Team - InterVenture</title>
+      <meta property="og:title" content="Senior AI-Native Fullstack Engineer - Ringier Team - InterVenture" />
+      <script type="application/ld+json">
+        {
+          "@context": "http://schema.org/",
+          "@type": "JobPosting",
+          "title": "Senior AI-Native Fullstack Engineer - Ringier Team",
+          "description": "&lt;p&gt;Ringier is a leading international media and technology company based in Switzerland, with a strong presence in digital marketplaces, media, and data-driven solutions.&lt;/p&gt;&lt;p&gt;We are looking for a Senior Fullstack Engineer who has moved past the era of manual boilerplate.&lt;/p&gt;&lt;p&gt;&lt;strong&gt;Your responsibilities:&lt;/strong&gt;&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Lead Agentic Workflows across the full TypeScript and Node.js stack.&lt;/li&gt;&lt;li&gt;Leverage AWS CDK and automated agents to deploy infrastructure-as-code.&lt;/li&gt;&lt;li&gt;Maintain standards for type-safety, security, and performance.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Your Tech Stack knowledge: TypeScript, Node.js and AWS.&lt;/p&gt;",
+          "identifier": {
+            "@type": "PropertyValue",
+            "name": "InterVenture",
+            "value": "7674883"
+          },
+          "employmentType": "FULL_TIME",
+          "hiringOrganization": {
+            "@type": "Organization",
+            "name": "InterVenture",
+            "sameAs": "https://interventure.teamtailor.com"
+          },
+          "jobLocation": [
+            {
+              "@type": "Place",
+              "address": {
+                "@type": "PostalAddress",
+                "addressLocality": "Beograd",
+                "addressCountry": "RS"
+              }
+            },
+            {
+              "@type": "Place",
+              "address": {
+                "@type": "PostalAddress",
+                "addressLocality": "Niš",
+                "addressCountry": "RS"
+              }
+            },
+            {
+              "@type": "Place",
+              "address": {
+                "@type": "PostalAddress",
+                "addressLocality": "Novi Sad",
+                "addressCountry": "RS"
+              }
+            }
+          ]
+        }
+      </script>
+    </head>
+    <body class="jobs show">
+      <main data-careersite--jobs--form-overlay-job-id-value="7674883">
+        <h1 class="font-company-header">Senior AI-Native Fullstack Engineer - Ringier Team</h1>
+        <section class="pt-20 pb-12">
+          <div class="prose font-company-body" data-controller="careersite--responsive-video">
+            <p>Ringier is a leading international media and technology company based in Switzerland.</p>
+          </div>
+        </section>
+        <dl>
+          <dt>Department</dt>
+          <dd>Node</dd>
+          <dt>Locations</dt>
+          <dd>
+            <a href="https://interventure.teamtailor.com/locations/belgrade">Belgrade</a>,
+            <a href="https://interventure.teamtailor.com/locations/nis">Niš</a>,
+            <a href="https://interventure.teamtailor.com/locations/novi-sad">Novi Sad</a>
+          </dd>
+        </dl>
+      </main>
+    </body>
+  </html>
+`;
+
 function okResponse(body: string, contentType = "text/html; charset=utf-8"): Response {
   return new Response(body, {
     status: 200,
@@ -98,8 +173,17 @@ describe("parseJob", () => {
   });
 
   it("exports JOB_PARSE_SOURCES and isJobParseSource for consumers", () => {
-    expect(JOB_PARSE_SOURCES).toEqual(["linkedin", "greenhouse", "hh", "lever", "jina", "direct"]);
+    expect(JOB_PARSE_SOURCES).toEqual([
+      "linkedin",
+      "greenhouse",
+      "hh",
+      "lever",
+      "teamtailor",
+      "jina",
+      "direct",
+    ]);
     expect(isJobParseSource("lever")).toBe(true);
+    expect(isJobParseSource("teamtailor")).toBe(true);
     expect(isJobParseSource("manual")).toBe(false);
     expect(isJobParseSource(null)).toBe(false);
   });
@@ -556,6 +640,76 @@ describe("parseJob", () => {
     expect(result.positionTitle).toBe("Pioneer Talent Program - AI Agent Developer");
     expect(result.warnings.some((warning) => warning.includes("lever attempt failed"))).toBe(true);
     expect(fetchMock).not.toHaveBeenCalledWith(LEVER_URL, expect.anything());
+  });
+
+  it("detects teamtailor.com job URLs as the Teamtailor source", () => {
+    expect(isTeamtailorUrl(TEAMTAILOR_URL)).toBe(true);
+    expect(isTeamtailorUrl("https://example.teamtailor.com/jobs/12345-some-role")).toBe(true);
+    expect(isTeamtailorUrl("https://example.teamtailor.com/jobs")).toBe(false);
+    expect(isTeamtailorUrl("https://example.com/jobs/123")).toBe(false);
+    expect(detectSpecificSource(TEAMTAILOR_URL)).toBe("teamtailor");
+  });
+
+  it("extracts Teamtailor JobPosting fields without Groq", async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input) === TEAMTAILOR_URL) {
+        return okResponse(TEAMTAILOR_DOM_FIXTURE);
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(TEAMTAILOR_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("teamtailor");
+    expect(result.companyName).toBe("InterVenture");
+    expect(result.positionTitle).toBe("Senior AI-Native Fullstack Engineer - Ringier Team");
+    expect(result.location).toBe("Belgrade / Niš / Novi Sad");
+    expect(result.jobDescription).toContain("Ringier is a leading international media and technology company");
+    expect(result.jobDescription).toContain("Your responsibilities:");
+    expect(result.jobDescription).toContain("- Lead Agentic Workflows across the full TypeScript and Node.js stack.");
+    expect(result.jobDescription).toContain("TypeScript, Node.js and AWS");
+    expect(result.jobDescription).not.toContain("&lt;p&gt;");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back from Teamtailor to Jina and normalizes through Groq", async () => {
+    initializeJobParser({ groqApiKey: "test-groq-key" });
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === TEAMTAILOR_URL) {
+        return new Response("", { status: 500 });
+      }
+      if (url === `https://r.jina.ai/${TEAMTAILOR_URL}`) {
+        return okResponse(`
+          Title: Senior AI-Native Fullstack Engineer - Ringier Team
+          URL Source: ${TEAMTAILOR_URL}
+          Markdown Content:
+          # Senior AI-Native Fullstack Engineer - Ringier Team
+          InterVenture
+          ${LONG_DESCRIPTION}
+        `, "text/plain; charset=utf-8");
+      }
+      if (url === GROQ_URL) {
+        return groqResponse({
+          companyName: "InterVenture",
+          positionTitle: "Senior AI-Native Fullstack Engineer - Ringier Team",
+          jobDescription: LONG_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(TEAMTAILOR_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("jina");
+    expect(result.companyName).toBe("InterVenture");
+    expect(result.positionTitle).toBe("Senior AI-Native Fullstack Engineer - Ringier Team");
+    expect(result.warnings.some((warning) => warning.includes("teamtailor attempt failed"))).toBe(true);
   });
 
   it("falls back from Jina to direct fetch", async () => {

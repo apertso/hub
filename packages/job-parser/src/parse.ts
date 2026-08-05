@@ -5,6 +5,7 @@ import { fetchHhJob } from "./sources/hh.js";
 import { fetchLeverJob } from "./sources/lever.js";
 import { fetchJinaText } from "./sources/jina.js";
 import { fetchLinkedInJob } from "./sources/linkedin.js";
+import { fetchTeamtailorJob } from "./sources/teamtailor.js";
 import {
   JobParserError,
   type JobParseResult,
@@ -85,6 +86,13 @@ function buildAttempts(url: string): ParseAttempt[] {
     attempts.push({
       source: "lever",
       run: () => fetchLeverJob(url),
+    });
+  }
+
+  if (specificSource === "teamtailor") {
+    attempts.push({
+      source: "teamtailor",
+      run: () => fetchTeamtailorJob(url),
     });
   }
 

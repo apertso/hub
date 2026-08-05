@@ -29,6 +29,11 @@ function isLeverHost(hostname: string): boolean {
   return ["jobs.lever.co", "jobs.eu.lever.co"].includes(hostname.toLowerCase());
 }
 
+export function isTeamtailorHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === "teamtailor.com" || normalized.endsWith(".teamtailor.com");
+}
+
 const LEVER_POSTING_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function isHhHost(hostname: string): boolean {
@@ -100,6 +105,19 @@ export function extractLinkedInJobId(url: string): string | null {
 export function isLeverUrl(url: string): boolean {
   try {
     return isLeverHost(new URL(url.trim()).hostname);
+  } catch {
+    return false;
+  }
+}
+
+export function isTeamtailorUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url.trim());
+    if (!isTeamtailorHost(parsed.hostname)) {
+      return false;
+    }
+
+    return /\/jobs\/\d+/i.test(parsed.pathname);
   } catch {
     return false;
   }
@@ -186,6 +204,10 @@ export function detectSpecificSource(url: string): Exclude<JobParseSource, "jina
 
   if (parseLeverJobTarget(url)) {
     return "lever";
+  }
+
+  if (isTeamtailorUrl(url)) {
+    return "teamtailor";
   }
 
   return null;

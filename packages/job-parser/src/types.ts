@@ -3,6 +3,7 @@ export const JOB_PARSE_SOURCES = [
   "greenhouse",
   "hh",
   "lever",
+  "teamtailor",
   "jina",
   "direct",
 ] as const;

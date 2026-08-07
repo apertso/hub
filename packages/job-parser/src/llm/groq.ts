@@ -1,4 +1,5 @@
 import { JobParserError, type JobParserConfig, type ParsedJobFields } from "../types.js";
+import { sanitizeVacancyText } from "../utils/text.js";
 import { normalizeGroqJobFields } from "./normalize.js";
 
 const DEFAULT_MODEL = "llama-3.1-8b-instant";
@@ -225,5 +226,13 @@ export async function extractJobFieldsWithGroq(rawText: string): Promise<ParsedJ
     ].join("\n"),
   });
 
-  return normalizeGroqJobFields(payload, truncatedText);
+  const fields = normalizeGroqJobFields(payload, rawText);
+  if (rawText.length > TEXT_LIMIT) {
+    fields.jobDescription = sanitizeVacancyText(rawText) || rawText.trim();
+    fields.warnings = [...new Set([
+      ...fields.warnings,
+      `Groq input exceeded ${TEXT_LIMIT} characters; using cleaned source text to preserve full coverage.`,
+    ])];
+  }
+  return fields;
 }

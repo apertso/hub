@@ -8,6 +8,8 @@ import { fetchLinkedInJob } from "./sources/linkedin.js";
 import { fetchTeamtailorJob } from "./sources/teamtailor.js";
 import {
   JobParserError,
+  type JobDescriptionEvidenceSource,
+  type JobParseDiagnostics,
   type JobParseResult,
   type JobParseSource,
   type JobParserConfig,
@@ -15,6 +17,7 @@ import {
 } from "./types.js";
 import { detectSpecificSource, normalizeJobUrl } from "./utils/url.js";
 import { validateParsedJob } from "./validation/validate.js";
+import { verifyGenericJobDescription } from "./verification/generic.js";
 
 type ParseAttempt = {
   source: JobParseSource;
@@ -41,6 +44,7 @@ function emptyResult(
   errorCodeValue: string,
   errorMessage: string,
   warnings: string[] = [],
+  diagnostics?: JobParseDiagnostics,
 ): JobParseResult {
   return {
     ok: false,
@@ -54,6 +58,7 @@ function emptyResult(
     warnings,
     errorCode: errorCodeValue,
     errorMessage,
+    diagnostics,
   };
 }
 
@@ -130,6 +135,61 @@ function buildFinalErrorMessage(failures: AttemptFailure[]): string {
   return failures.map((failure) => `${failure.source}: ${failure.message}`).join(" | ");
 }
 
+function parseSourceForEvidence(source: JobDescriptionEvidenceSource): JobParseSource {
+  return source === "jsonld" ? "direct" : source;
+}
+
+function sourceForFailedVerification(diagnostics: JobParseDiagnostics): JobParseSource {
+  const successfulSource = diagnostics.sources.find((source) => source.ok)?.source;
+  return successfulSource ? parseSourceForEvidence(successfulSource) : "direct";
+}
+
+async function parseVerifiedGenericJob(url: string): Promise<JobParseResult> {
+  const verification = await verifyGenericJobDescription(url);
+  if (!verification.ok) {
+    return emptyResult(
+      url,
+      sourceForFailedVerification(verification.diagnostics),
+      verification.errorCode,
+      verification.errorMessage,
+      [],
+      verification.diagnostics,
+    );
+  }
+
+  const source = parseSourceForEvidence(verification.source);
+  try {
+    const fields = await extractJobFieldsWithGroq(verification.text);
+    const validation = validateParsedJob(fields);
+    if (validation.errorCode) {
+      throw new JobParserError(validation.errorCode, validation.errorMessage ?? "Parsed job is invalid.");
+    }
+
+    return {
+      ok: true,
+      url,
+      source,
+      companyName: fields.companyName,
+      positionTitle: fields.positionTitle,
+      salary: fields.salary,
+      location: fields.location,
+      jobDescription: fields.jobDescription,
+      warnings: [...new Set([...fields.warnings, ...validation.warnings])],
+      diagnostics: verification.diagnostics,
+    };
+  } catch (error) {
+    const message = stringifyError(error);
+    return emptyResult(
+      url,
+      source,
+      errorCode(error),
+      message,
+      [`${source} attempt failed: ${message}`],
+      verification.diagnostics,
+    );
+  }
+}
+
 export function initializeJobParser(config: JobParserConfig): void {
   initializeGroqClient(config);
 }
@@ -149,6 +209,10 @@ export async function parseJob(url: string): Promise<JobParseResult> {
       errorCode(error),
       stringifyError(error),
     );
+  }
+
+  if (!detectSpecificSource(normalizedUrl)) {
+    return parseVerifiedGenericJob(normalizedUrl);
   }
 
   const failures: AttemptFailure[] = [];

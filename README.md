@@ -19,6 +19,13 @@ initializeJobParser({
 const result = await parseJob("https://example.com/jobs/frontend-engineer");
 ```
 
+For generic URLs, the parser verifies description completeness before calling Groq. It fetches Jina and the page directly, extracts `JobPosting.description` JSON-LD when available, and requires two sufficiently agreeing text sources. Failed verification returns `ok: false` with:
+
+- `JOB_DESCRIPTION_INCOMPLETE` when successful sources diverge
+- `JOB_DESCRIPTION_UNVERIFIED` when fewer than two independent text sources succeed
+
+These results include `diagnostics` with source lengths, pairwise coverage and similarity ratios, section coverage, and missing sections. Site-specific LinkedIn, Greenhouse, HH, Lever, and Teamtailor extractors keep their existing fallback behavior.
+
 ## skleika
 
 `skleika` exports source files into `project_code.txt` in the current working directory.

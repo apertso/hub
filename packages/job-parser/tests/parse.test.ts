@@ -166,6 +166,25 @@ function groqResponse(body: unknown): Response {
   });
 }
 
+function genericJobHtml(visibleDescription = "", structuredDescription = ""): string {
+  const jsonLd = structuredDescription
+    ? `<script type="application/ld+json">${JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "JobPosting",
+        title: "Senior Frontend Engineer",
+        hiringOrganization: { name: "Example Labs" },
+        description: structuredDescription,
+      })}</script>`
+    : "";
+
+  return `
+    <html>
+      <head>${jsonLd}</head>
+      <body><main>${visibleDescription.replace(/\n/g, "<br>")}</main></body>
+    </html>
+  `;
+}
+
 describe("parseJob", () => {
   afterEach(() => {
     resetJobParserForTests();
@@ -712,7 +731,164 @@ describe("parseJob", () => {
     expect(result.warnings.some((warning) => warning.includes("teamtailor attempt failed"))).toBe(true);
   });
 
-  it("falls back from Jina to direct fetch", async () => {
+  it("accepts a generic job when Jina and direct descriptions agree", async () => {
+    initializeJobParser({ groqApiKey: "test-groq-key" });
+    const jobUrl = "https://example.com/jobs/verified-frontend-engineer";
+    const fetchMock = vi.fn(async (input: unknown, _init?: RequestInit) => {
+      const url = String(input);
+      if (url === `https://r.jina.ai/${jobUrl}`) {
+        return okResponse(SECTIONED_DESCRIPTION, "text/plain");
+      }
+      if (url === jobUrl) {
+        return okResponse(genericJobHtml(SECTIONED_DESCRIPTION));
+      }
+      if (url === GROQ_URL) {
+        return groqResponse({
+          companyName: "Example Labs",
+          positionTitle: "Senior Frontend Engineer",
+          salary: "",
+          location: "Remote",
+          jobDescription: SECTIONED_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(true);
+    expect(result.diagnostics?.verificationStatus).toBe("verified");
+    expect(result.diagnostics?.selectedSource).toBeDefined();
+    expect(result.diagnostics?.sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: "jina", ok: true, textLength: expect.any(Number) }),
+      expect.objectContaining({ source: "direct", ok: true, textLength: expect.any(Number) }),
+    ]));
+    expect(result.diagnostics?.comparisons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ leftSource: "jina", rightSource: "direct", agrees: true }),
+    ]));
+  });
+
+  it("rejects a generic job when Jina appears truncated relative to direct", async () => {
+    initializeJobParser({ groqApiKey: "test-groq-key" });
+    const jobUrl = "https://example.com/jobs/truncated-frontend-engineer";
+    const truncatedDescription = SECTIONED_DESCRIPTION.split("Required experience")[0]?.trim() ?? "";
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === `https://r.jina.ai/${jobUrl}`) {
+        return okResponse(truncatedDescription, "text/plain");
+      }
+      if (url === jobUrl) {
+        return okResponse(genericJobHtml(SECTIONED_DESCRIPTION));
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(false);
+    expect(result.errorCode).toBe("JOB_DESCRIPTION_INCOMPLETE");
+    expect(result.diagnostics?.verificationStatus).toBe("incomplete");
+    expect(result.diagnostics?.comparisons[0]).toEqual(expect.objectContaining({
+      agrees: false,
+      coverageRatio: expect.any(Number),
+      missingSections: expect.arrayContaining(["requirements", "benefits"]),
+    }));
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === GROQ_URL)).toBe(false);
+  });
+
+  it("rejects a generic job when a high-overlap source omits a complete section", async () => {
+    initializeJobParser({ groqApiKey: "test-groq-key" });
+    const jobUrl = "https://example.com/jobs/missing-benefits";
+    const descriptionWithoutBenefits = SECTIONED_DESCRIPTION.split("Benefits")[0]?.trim() ?? "";
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === `https://r.jina.ai/${jobUrl}`) {
+        return okResponse(descriptionWithoutBenefits, "text/plain");
+      }
+      if (url === jobUrl) {
+        return okResponse(genericJobHtml(SECTIONED_DESCRIPTION));
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(false);
+    expect(result.errorCode).toBe("JOB_DESCRIPTION_INCOMPLETE");
+    expect(result.diagnostics?.comparisons[0]).toEqual(expect.objectContaining({
+      agrees: false,
+      missingSections: expect.arrayContaining(["benefits"]),
+    }));
+  });
+
+  it("rejects an unverified generic job when only Jina succeeds", async () => {
+    initializeJobParser({ groqApiKey: "test-groq-key" });
+    const jobUrl = "https://example.com/jobs/unverified-frontend-engineer";
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === `https://r.jina.ai/${jobUrl}`) {
+        return okResponse(SECTIONED_DESCRIPTION, "text/plain");
+      }
+      if (url === jobUrl) {
+        return new Response("", { status: 503 });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(false);
+    expect(result.errorCode).toBe("JOB_DESCRIPTION_UNVERIFIED");
+    expect(result.diagnostics?.verificationStatus).toBe("unverified");
+    expect(result.diagnostics?.sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: "jina", ok: true }),
+      expect.objectContaining({ source: "direct", ok: false, errorCode: "DIRECT_HTTP_ERROR" }),
+      expect.objectContaining({ source: "jsonld", ok: false }),
+    ]));
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === GROQ_URL)).toBe(false);
+  });
+
+  it("accepts a generic job when direct text and JSON-LD corroborate each other", async () => {
+    initializeJobParser({ groqApiKey: "test-groq-key" });
+    const jobUrl = "https://example.com/jobs/structured-frontend-engineer";
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === `https://r.jina.ai/${jobUrl}`) {
+        return new Response("", { status: 429 });
+      }
+      if (url === jobUrl) {
+        return okResponse(genericJobHtml(SECTIONED_DESCRIPTION, SECTIONED_DESCRIPTION));
+      }
+      if (url === GROQ_URL) {
+        return groqResponse({
+          companyName: "Example Labs",
+          positionTitle: "Senior Frontend Engineer",
+          salary: "",
+          location: "Remote",
+          jobDescription: SECTIONED_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("direct");
+    expect(result.diagnostics?.verificationStatus).toBe("verified");
+    expect(result.diagnostics?.comparisons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ leftSource: "direct", rightSource: "jsonld", agrees: true }),
+    ]));
+  });
+
+  it("returns unverified when only direct JSON-LD succeeds", async () => {
     initializeJobParser({ groqApiKey: "test-groq-key" });
     const jobUrl = "https://example.com/jobs/frontend-engineer";
     const directHtml = `
@@ -758,39 +934,20 @@ describe("parseJob", () => {
       if (url === jobUrl) {
         return okResponse(directHtml);
       }
-      if (url === GROQ_URL) {
-        return groqResponse({
-          companyName: "Example Labs",
-          positionTitle: "Frontend Engineer",
-          salary: "USD 140000 - 180000 / YEAR",
-          location: "Austin, TX, US",
-          jobDescription: LONG_DESCRIPTION,
-          warnings: [],
-        });
-      }
       return new Response("", { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await parseJob(jobUrl);
 
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
     expect(result.source).toBe("direct");
-    expect(result.companyName).toBe("Example Labs");
-    expect(result.positionTitle).toBe("Frontend Engineer");
-    expect(result.salary).toBe("USD 140000 - 180000 / YEAR");
-    expect(result.location).toBe("Austin, TX, US");
-    const groqCall = fetchMock.mock.calls.find(([input]) => String(input) === GROQ_URL);
-    expect(groqCall?.[1]?.body).toEqual(expect.any(String));
-    const groqBody = JSON.parse(groqCall?.[1]?.body as string) as {
-      messages: Array<{ content: string }>;
-    };
-    expect(groqBody.messages[1]?.content).toContain("Salary: USD 140000 - 180000 / YEAR");
-    expect(groqBody.messages[1]?.content).toContain("Location: Austin, TX, US");
-    expect(groqBody.messages[1]?.content).toContain("Include intro/context");
-    expect(groqBody.messages[1]?.content).toContain("do not summarize");
-    expect(groqBody.messages[1]?.content).toContain("Do not return only responsibilities");
-    expect(result.warnings.some((warning) => warning.includes("jina attempt failed"))).toBe(true);
+    expect(result.errorCode).toBe("JOB_DESCRIPTION_UNVERIFIED");
+    expect(result.diagnostics?.sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: "jsonld", ok: true }),
+      expect.objectContaining({ source: "direct", ok: false }),
+    ]));
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === GROQ_URL)).toBe(false);
   });
 
   it("falls back to cleaned source text when Groq returns only one description section", async () => {
@@ -805,6 +962,9 @@ describe("parseJob", () => {
       const url = String(input);
       if (url === `https://r.jina.ai/${jobUrl}`) {
         return okResponse(SECTIONED_DESCRIPTION, "text/plain");
+      }
+      if (url === jobUrl) {
+        return okResponse(genericJobHtml(SECTIONED_DESCRIPTION));
       }
       if (url === GROQ_URL) {
         return groqResponse({
@@ -831,6 +991,52 @@ describe("parseJob", () => {
     expect(result.warnings).toContain("Groq returned incomplete jobDescription; using cleaned source text.");
   });
 
+  it("preserves verified source text beyond the Groq input limit", async () => {
+    initializeJobParser({ groqApiKey: "test-groq-key" });
+    const jobUrl = "https://example.com/jobs/long-description";
+    const tailMarker = "COMPLETE_DESCRIPTION_TAIL_MARKER";
+    const longDescription = [
+      SECTIONED_DESCRIPTION,
+      ...Array.from(
+        { length: 360 },
+        (_, index) => `Project context ${index}: collaborate across engineering, product, and design on reliable customer workflows.`,
+      ),
+      tailMarker,
+    ].join("\n");
+    expect(longDescription.length).toBeGreaterThan(20_000);
+    const fetchMock = vi.fn(async (input: unknown, _init?: RequestInit) => {
+      const url = String(input);
+      if (url === `https://r.jina.ai/${jobUrl}`) {
+        return okResponse(longDescription, "text/plain");
+      }
+      if (url === jobUrl) {
+        return okResponse(genericJobHtml(longDescription));
+      }
+      if (url === GROQ_URL) {
+        return groqResponse({
+          companyName: "Example Labs",
+          positionTitle: "Senior Frontend Engineer",
+          salary: "",
+          location: "Remote",
+          jobDescription: SECTIONED_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(true);
+    expect(result.jobDescription).toContain(tailMarker);
+    expect(result.warnings).toContain(
+      "Groq input exceeded 20000 characters; using cleaned source text to preserve full coverage.",
+    );
+    const groqCall = fetchMock.mock.calls.find(([input]) => String(input) === GROQ_URL);
+    expect(String(groqCall?.[1]?.body)).not.toContain(tailMarker);
+  });
+
   it("adds a warning when Groq returns a section heading as the title", async () => {
     initializeJobParser({ groqApiKey: "test-groq-key" });
     const jobUrl = "https://example.com/jobs/unclear";
@@ -838,6 +1044,9 @@ describe("parseJob", () => {
       const url = String(input);
       if (url === `https://r.jina.ai/${jobUrl}`) {
         return okResponse(`${LONG_DESCRIPTION}\nMore details about product engineering and quality ownership.`, "text/plain");
+      }
+      if (url === jobUrl) {
+        return okResponse(genericJobHtml(`${LONG_DESCRIPTION}\nMore details about product engineering and quality ownership.`));
       }
       if (url === GROQ_URL) {
         return groqResponse({

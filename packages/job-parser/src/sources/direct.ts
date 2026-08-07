@@ -1,6 +1,8 @@
 import { JobParserError } from "../types.js";
 import {
+  extractJobPostingDescriptionFromHtml,
   extractVacancyTextFromHtml,
+  extractVisibleVacancyTextFromHtml,
   fallbackVacancyTextFromHtml,
   isVacancyTextTooShort,
 } from "../utils/text.js";
@@ -21,7 +23,7 @@ function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
   return undefined;
 }
 
-export async function fetchDirectText(url: string): Promise<string> {
+async function fetchDirectHtml(url: string): Promise<string> {
   const response = await fetch(url, {
     headers: FETCH_HEADERS,
     signal: timeoutSignal(FETCH_TIMEOUT_MS),
@@ -31,7 +33,26 @@ export async function fetchDirectText(url: string): Promise<string> {
     throw new JobParserError("DIRECT_HTTP_ERROR", `Direct fetch returned HTTP ${response.status}.`);
   }
 
-  const html = await response.text();
+  return response.text();
+}
+
+export type DirectJobEvidence = {
+  directText: string;
+  structuredText: string;
+};
+
+export async function fetchDirectJobEvidence(url: string): Promise<DirectJobEvidence> {
+  const html = await fetchDirectHtml(url);
+  const visibleText = extractVisibleVacancyTextFromHtml(html) || fallbackVacancyTextFromHtml(html);
+
+  return {
+    directText: visibleText,
+    structuredText: extractJobPostingDescriptionFromHtml(html),
+  };
+}
+
+export async function fetchDirectText(url: string): Promise<string> {
+  const html = await fetchDirectHtml(url);
   const text = extractVacancyTextFromHtml(html) || fallbackVacancyTextFromHtml(html);
   if (isVacancyTextTooShort(text)) {
     throw new JobParserError("DIRECT_TEXT_TOO_SHORT", "Direct fetch result is missing useful vacancy text.");

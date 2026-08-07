@@ -23,12 +23,41 @@ export type ParsedJobFields = {
   warnings: string[];
 };
 
+export type JobDescriptionEvidenceSource = "jina" | "direct" | "jsonld";
+
+export type JobDescriptionSourceDiagnostic = {
+  source: JobDescriptionEvidenceSource;
+  ok: boolean;
+  textLength: number;
+  errorCode?: string;
+  errorMessage?: string;
+};
+
+export type JobDescriptionComparisonDiagnostic = {
+  leftSource: JobDescriptionEvidenceSource;
+  rightSource: JobDescriptionEvidenceSource;
+  lengthRatio: number;
+  coverageRatio: number;
+  similarityRatio: number;
+  sectionCoverageRatio: number;
+  missingSections: string[];
+  agrees: boolean;
+};
+
+export type JobParseDiagnostics = {
+  verificationStatus: "verified" | "incomplete" | "unverified";
+  selectedSource?: JobDescriptionEvidenceSource;
+  sources: JobDescriptionSourceDiagnostic[];
+  comparisons: JobDescriptionComparisonDiagnostic[];
+};
+
 export type JobParseResult = ParsedJobFields & {
   ok: boolean;
   url: string;
   source: JobParseSource;
   errorCode?: string;
   errorMessage?: string;
+  diagnostics?: JobParseDiagnostics;
 };
 
 export type JobParserConfig = {

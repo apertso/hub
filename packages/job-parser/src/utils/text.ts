@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 
-const MAX_VACANCY_TEXT_LENGTH = 16_000;
+export const MAX_VACANCY_TEXT_LENGTH = 100_000;
 const MIN_EFFECTIVE_VACANCY_TEXT_LENGTH = 180;
 
 const NOISE_PATTERNS: RegExp[] = [
@@ -516,6 +516,15 @@ function extractJobPostingText(html: string): string {
   return linesToText(postProcessLines(splitCleanLines(lines.join("\n"))));
 }
 
+export function extractJobPostingDescriptionFromHtml(html: string): string {
+  const best = selectBestJobPosting(html);
+  if (!best || typeof best.description !== "string") {
+    return "";
+  }
+
+  return linesToText(postProcessLines(splitCleanLines(stripTags(best.description))));
+}
+
 function htmlToLines(html: string): string[] {
   const text = decodeHtmlEntities(html)
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
@@ -624,14 +633,18 @@ export function sanitizeVacancyText(value: string): string {
   return windowedTextFromSingleLine(value);
 }
 
-export function extractVacancyTextFromHtml(html: string): string {
+export function extractVisibleVacancyTextFromHtml(html: string): string {
   const linkedinDescriptionText = extractLinkedInDescriptionText(html);
   if (!isVacancyTextTooShort(linkedinDescriptionText)) {
     return linkedinDescriptionText;
   }
 
+  return linesToText(postProcessLines(htmlToLines(html)));
+}
+
+export function extractVacancyTextFromHtml(html: string): string {
+  const htmlText = extractVisibleVacancyTextFromHtml(html);
   const jsonLdText = extractJobPostingText(html);
-  const htmlText = linkedinDescriptionText || linesToText(postProcessLines(htmlToLines(html)));
 
   if (!jsonLdText) {
     return htmlText;

@@ -1,7 +1,6 @@
 import type { ParsedJobFields } from "../types.js";
 import { normalizeWhitespace, sanitizeVacancyText } from "../utils/text.js";
 
-const JOB_DESCRIPTION_LIMIT = 20_000;
 const INCOMPLETE_DESCRIPTION_WARNING = "Groq returned incomplete jobDescription; using cleaned source text.";
 const CORE_SECTION_KEYS = new Set(["intro", "responsibilities", "requirements", "benefits"]);
 
@@ -64,19 +63,19 @@ function readString(record: Record<string, unknown>, keys: string[]): string {
 }
 
 function cleanSourceDescription(rawText: string): string {
-  const sanitized = sanitizeVacancyText(rawText).slice(0, JOB_DESCRIPTION_LIMIT);
+  const sanitized = sanitizeVacancyText(rawText);
   if (sanitized) {
     return sanitized;
   }
 
-  return rawText.trim().slice(0, JOB_DESCRIPTION_LIMIT);
+  return rawText.trim();
 }
 
 function readDescription(record: Record<string, unknown>, sourceDescription: string): DescriptionResult {
   for (const key of ["jobDescription", "job_description", "description", "text"]) {
     const value = record[key];
     if (typeof value === "string") {
-      const sanitized = sanitizeVacancyText(value).slice(0, JOB_DESCRIPTION_LIMIT);
+      const sanitized = sanitizeVacancyText(value);
       if (sanitized) {
         return { value: sanitized, warning: null, fromGroq: true };
       }
@@ -109,7 +108,7 @@ function normalizeForCoverage(value: string): string {
     .toLowerCase();
 }
 
-function sectionKeysFor(value: string): Set<string> {
+export function sectionKeysFor(value: string): Set<string> {
   const keys = new Set<string>();
   for (const section of VACANCY_SECTION_PATTERNS) {
     if (section.pattern.test(value)) {

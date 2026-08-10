@@ -14,7 +14,7 @@ function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
   return undefined;
 }
 
-export async function fetchJinaJobEvidence(url: string): Promise<string> {
+export async function fetchJinaText(url: string): Promise<string> {
   const response = await fetch(`https://r.jina.ai/${url}`, {
     headers: {
       Accept: "text/plain",
@@ -26,11 +26,7 @@ export async function fetchJinaJobEvidence(url: string): Promise<string> {
     throw new JobParserError("JINA_HTTP_ERROR", `Jina returned HTTP ${response.status}.`);
   }
 
-  return sanitizeVacancyText(stripJinaEnvelope(await response.text()));
-}
-
-export async function fetchJinaText(url: string): Promise<string> {
-  const text = await fetchJinaJobEvidence(url);
+  const text = sanitizeVacancyText(stripJinaEnvelope(await response.text()));
   if (isVacancyTextTooShort(text)) {
     throw new JobParserError("JINA_TEXT_TOO_SHORT", "Jina result is missing useful vacancy text.");
   }

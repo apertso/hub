@@ -32,7 +32,7 @@ export type JobParseResult = ParsedJobFields & {
 };
 
 export type JobParserConfig = {
-  groqApiKey: string;
+  openRouterApiKey: string;
   llmModel?: string;
 };
 

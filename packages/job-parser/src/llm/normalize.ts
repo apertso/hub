@@ -1,12 +1,12 @@
 import type { ParsedJobFields } from "../types.js";
 import { normalizeWhitespace, sanitizeVacancyText } from "../utils/text.js";
 
-const INCOMPLETE_DESCRIPTION_WARNING = "Groq returned incomplete jobDescription; using cleaned source text.";
+const INCOMPLETE_DESCRIPTION_WARNING = "OpenRouter returned incomplete jobDescription; using cleaned source text.";
 
 type DescriptionResult = {
   value: string;
   warning: string | null;
-  fromGroq: boolean;
+  fromOpenRouter: boolean;
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -46,15 +46,15 @@ function readDescription(record: Record<string, unknown>, sourceDescription: str
     if (typeof value === "string") {
       const sanitized = sanitizeVacancyText(value);
       if (sanitized) {
-        return { value: sanitized, warning: null, fromGroq: true };
+        return { value: sanitized, warning: null, fromOpenRouter: true };
       }
     }
   }
 
   return {
     value: sourceDescription,
-    warning: "Groq did not return jobDescription; using cleaned source text.",
-    fromGroq: false,
+    warning: "OpenRouter did not return jobDescription; using cleaned source text.",
+    fromOpenRouter: false,
   };
 }
 
@@ -100,7 +100,7 @@ function isBulletHeavyDescription(description: string): boolean {
   return bulletLines / lines.length >= 0.6;
 }
 
-function isGroqDescriptionIncomplete(description: string, sourceDescription: string): boolean {
+function isOpenRouterDescriptionIncomplete(description: string, sourceDescription: string): boolean {
   const normalizedDescription = normalizeForCoverage(description);
   const normalizedSource = normalizeForCoverage(sourceDescription);
   if (!normalizedDescription || normalizedSource.length < 450) {
@@ -123,7 +123,7 @@ function isGroqDescriptionIncomplete(description: string, sourceDescription: str
   return isBulletHeavyDescription(description) && lengthRatio < 0.55;
 }
 
-export function normalizeGroqJobFields(payload: unknown, rawText: string): ParsedJobFields {
+export function normalizeOpenRouterJobFields(payload: unknown, rawText: string): ParsedJobFields {
   const record = asRecord(payload);
   const sourceDescription = cleanSourceDescription(rawText);
   const description = readDescription(record, sourceDescription);
@@ -131,7 +131,7 @@ export function normalizeGroqJobFields(payload: unknown, rawText: string): Parse
   if (description.warning) {
     warnings.push(description.warning);
   }
-  if (description.fromGroq && isGroqDescriptionIncomplete(description.value, sourceDescription)) {
+  if (description.fromOpenRouter && isOpenRouterDescriptionIncomplete(description.value, sourceDescription)) {
     description.value = sourceDescription;
     warnings.push(INCOMPLETE_DESCRIPTION_WARNING);
   }

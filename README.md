@@ -9,14 +9,14 @@
 `@hub/job-parser` requires explicit initialization before `parseJob()`:
 
 ```ts
-import { initializeJobParser, parseJob } from "@hub/job-parser";
+import { initializeJobParser, parseJob } from '@hub/job-parser';
 
 initializeJobParser({
-  groqApiKey: process.env.GROQ_API_KEY ?? "",
-  llmModel: "llama-3.1-8b-instant", // optional
+  openRouterApiKey: process.env.OPENROUTER_API_KEY ?? '',
+  llmModel: 'inclusionai/ling-3.0-flash', // optional
 });
 
-const result = await parseJob("https://example.com/jobs/frontend-engineer");
+const result = await parseJob('https://example.com/jobs/frontend-engineer');
 ```
 
 ## skleika

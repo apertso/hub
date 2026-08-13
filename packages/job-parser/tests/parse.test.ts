@@ -3,7 +3,7 @@ import { initializeJobParser, isJobParseSource, JOB_PARSE_SOURCES, parseJob } fr
 import { resetJobParserForTests } from "../src/parse.js";
 import { detectSpecificSource, isHhUrl, isLeverUrl, isTeamtailorUrl } from "../src/utils/url.js";
 
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const LINKEDIN_URL = "https://www.linkedin.com/jobs/view/4402429247/";
 const RUBY_LINKEDIN_URL = "https://www.linkedin.com/jobs/view/4411409358";
 const GREENHOUSE_URL = "https://job-boards.eu.greenhouse.io/brainrocketltd/jobs/4643018101";
@@ -154,7 +154,7 @@ function okJson(body: unknown): Response {
   return okResponse(JSON.stringify(body), "application/json; charset=utf-8");
 }
 
-function groqResponse(body: unknown): Response {
+function openRouterResponse(body: unknown): Response {
   return okJson({
     choices: [
       {
@@ -188,7 +188,7 @@ describe("parseJob", () => {
     expect(isJobParseSource(null)).toBe(false);
   });
 
-  it("extracts LinkedIn guest title, company, and description without Groq", async () => {
+  it("extracts LinkedIn guest title, company, and description without OpenRouter", async () => {
     const linkedinGuestHtml = `
       <html>
         <body>
@@ -446,7 +446,7 @@ describe("parseJob", () => {
     expect(detectSpecificSource("https://nn.hh.ru/vacancy/133066281")).toBe("hh");
   });
 
-  it("extracts HH vacancy fields from scoped data-qa selectors without Groq", async () => {
+  it("extracts HH vacancy fields from scoped data-qa selectors without OpenRouter", async () => {
     const fetchMock = vi.fn(async (input: unknown) => {
       if (String(input) === HH_URL) {
         return okResponse(HH_DOM_FIXTURE);
@@ -471,7 +471,7 @@ describe("parseJob", () => {
   });
 
   it("falls back from HH parsing to Jina and keeps fallback warnings", async () => {
-    initializeJobParser({ groqApiKey: "test-groq-key" });
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = String(input);
       if (url === HH_URL) {
@@ -491,8 +491,8 @@ describe("parseJob", () => {
           ${LONG_DESCRIPTION}
         `, "text/plain; charset=utf-8");
       }
-      if (url === GROQ_URL) {
-        return groqResponse({
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
           companyName: "Example Labs",
           positionTitle: "Senior Backend Engineer",
           salary: "$140,000 - $180,000",
@@ -517,12 +517,12 @@ describe("parseJob", () => {
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
       HH_URL,
       `https://r.jina.ai/${HH_URL}`,
-      GROQ_URL,
+      OPENROUTER_URL,
     ]);
   });
 
   it("falls back from HH parsing through Jina to direct fetch", async () => {
-    initializeJobParser({ groqApiKey: "test-groq-key" });
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
     let hhFetchCount = 0;
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = String(input);
@@ -536,8 +536,8 @@ describe("parseJob", () => {
       if (url === `https://r.jina.ai/${HH_URL}`) {
         return new Response("", { status: 429 });
       }
-      if (url === GROQ_URL) {
-        return groqResponse({
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
           companyName: "Example Labs",
           positionTitle: "Frontend Engineer",
           jobDescription: LONG_DESCRIPTION,
@@ -560,12 +560,12 @@ describe("parseJob", () => {
       HH_URL,
       `https://r.jina.ai/${HH_URL}`,
       HH_URL,
-      GROQ_URL,
+      OPENROUTER_URL,
     ]);
   });
 
-  it("falls back from a specific source to Jina and normalizes through Groq", async () => {
-    initializeJobParser({ groqApiKey: "test-groq-key" });
+  it("falls back from a specific source to Jina and normalizes through OpenRouter", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = String(input);
       if (url === "https://boards-api.greenhouse.io/v1/boards/brainrocketltd/jobs/4643018101") {
@@ -581,8 +581,8 @@ describe("parseJob", () => {
           ${LONG_DESCRIPTION}
         `, "text/plain; charset=utf-8");
       }
-      if (url === GROQ_URL) {
-        return groqResponse({
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
           companyName: "Example Labs",
           positionTitle: "Senior Backend Engineer",
           jobDescription: LONG_DESCRIPTION,
@@ -603,8 +603,8 @@ describe("parseJob", () => {
     expect(fetchMock).not.toHaveBeenCalledWith(GREENHOUSE_URL, expect.anything());
   });
 
-  it("falls back from Lever to Jina and normalizes through Groq", async () => {
-    initializeJobParser({ groqApiKey: "test-groq-key" });
+  it("falls back from Lever to Jina and normalizes through OpenRouter", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = String(input);
       if (url === "https://api.lever.co/v0/postings/binance/8a4660a3-28de-41e6-bcaf-ef404c481338?mode=json") {
@@ -620,8 +620,8 @@ describe("parseJob", () => {
           ${LONG_DESCRIPTION}
         `, "text/plain; charset=utf-8");
       }
-      if (url === GROQ_URL) {
-        return groqResponse({
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
           companyName: "Binance",
           positionTitle: "Pioneer Talent Program - AI Agent Developer",
           jobDescription: LONG_DESCRIPTION,
@@ -650,7 +650,7 @@ describe("parseJob", () => {
     expect(detectSpecificSource(TEAMTAILOR_URL)).toBe("teamtailor");
   });
 
-  it("extracts Teamtailor JobPosting fields without Groq", async () => {
+  it("extracts Teamtailor JobPosting fields without OpenRouter", async () => {
     const fetchMock = vi.fn(async (input: unknown) => {
       if (String(input) === TEAMTAILOR_URL) {
         return okResponse(TEAMTAILOR_DOM_FIXTURE);
@@ -674,8 +674,8 @@ describe("parseJob", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back from Teamtailor to Jina and normalizes through Groq", async () => {
-    initializeJobParser({ groqApiKey: "test-groq-key" });
+  it("falls back from Teamtailor to Jina and normalizes through OpenRouter", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = String(input);
       if (url === TEAMTAILOR_URL) {
@@ -691,8 +691,8 @@ describe("parseJob", () => {
           ${LONG_DESCRIPTION}
         `, "text/plain; charset=utf-8");
       }
-      if (url === GROQ_URL) {
-        return groqResponse({
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
           companyName: "InterVenture",
           positionTitle: "Senior AI-Native Fullstack Engineer - Ringier Team",
           jobDescription: LONG_DESCRIPTION,
@@ -713,7 +713,7 @@ describe("parseJob", () => {
   });
 
   it("accepts a non-English generic job from Jina without requiring corroboration", async () => {
-    initializeJobParser({ groqApiKey: "test-groq-key" });
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
     const jobUrl = "https://example.com/jobs/inzhener-interfeysov";
     const russianDescription = [
       "Мы создаём программные продукты для автоматизации рабочих процессов крупных команд.",
@@ -729,8 +729,8 @@ describe("parseJob", () => {
       if (url === jobUrl) {
         return new Response("", { status: 503 });
       }
-      if (url === GROQ_URL) {
-        return groqResponse({
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
           companyName: "Пример Лабс",
           positionTitle: "Инженер интерфейсов",
           salary: "",
@@ -753,7 +753,7 @@ describe("parseJob", () => {
   });
 
   it("falls back from Jina to direct fetch", async () => {
-    initializeJobParser({ groqApiKey: "test-groq-key" });
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
     const jobUrl = "https://example.com/jobs/frontend-engineer";
     const directHtml = `
       <html>
@@ -798,8 +798,8 @@ describe("parseJob", () => {
       if (url === jobUrl) {
         return okResponse(directHtml);
       }
-      if (url === GROQ_URL) {
-        return groqResponse({
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
           companyName: "Example Labs",
           positionTitle: "Frontend Engineer",
           salary: "USD 140000 - 180000 / YEAR",
@@ -820,23 +820,37 @@ describe("parseJob", () => {
     expect(result.positionTitle).toBe("Frontend Engineer");
     expect(result.salary).toBe("USD 140000 - 180000 / YEAR");
     expect(result.location).toBe("Austin, TX, US");
-    const groqCall = fetchMock.mock.calls.find(([input]) => String(input) === GROQ_URL);
-    expect(groqCall?.[1]?.body).toEqual(expect.any(String));
-    const groqBody = JSON.parse(groqCall?.[1]?.body as string) as {
+    const openRouterCall = fetchMock.mock.calls.find(([input]) => String(input) === OPENROUTER_URL);
+    expect(openRouterCall?.[1]?.body).toEqual(expect.any(String));
+    const openRouterBody = JSON.parse(openRouterCall?.[1]?.body as string) as {
+      model: string;
+      temperature: number;
+      top_p: number;
+      top_k: number;
+      max_tokens: number;
+      reasoning: { enabled: boolean; effort: string };
+      chat_template_kwargs: { enable_thinking: boolean };
       messages: Array<{ content: string }>;
     };
-    expect(groqBody.messages[1]?.content).toContain("Salary: USD 140000 - 180000 / YEAR");
-    expect(groqBody.messages[1]?.content).toContain("Location: Austin, TX, US");
-    expect(groqBody.messages[1]?.content).toContain("Include intro/context");
-    expect(groqBody.messages[1]?.content).toContain("do not summarize");
-    expect(groqBody.messages[1]?.content).toContain("Do not return only responsibilities");
+    expect(openRouterBody.model).toBe("inclusionai/ling-3.0-flash");
+    expect(openRouterBody.temperature).toBe(0.2);
+    expect(openRouterBody.top_p).toBe(0.95);
+    expect(openRouterBody.top_k).toBe(20);
+    expect(openRouterBody.max_tokens).toBe(8_192);
+    expect(openRouterBody.reasoning).toEqual({ enabled: false, effort: "none" });
+    expect(openRouterBody.chat_template_kwargs).toEqual({ enable_thinking: false });
+    expect(openRouterBody.messages[1]?.content).toContain("Salary: USD 140000 - 180000 / YEAR");
+    expect(openRouterBody.messages[1]?.content).toContain("Location: Austin, TX, US");
+    expect(openRouterBody.messages[1]?.content).toContain("Include intro/context");
+    expect(openRouterBody.messages[1]?.content).toContain("do not summarize");
+    expect(openRouterBody.messages[1]?.content).toContain("Do not return only responsibilities");
     expect(result.warnings.some((warning) => warning.includes("jina attempt failed"))).toBe(true);
   });
 
-  it("falls back to cleaned source text when Groq returns only one description section", async () => {
-    initializeJobParser({ groqApiKey: "test-groq-key" });
+  it("falls back to cleaned source text when OpenRouter returns only one description section", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
     const jobUrl = "https://example.com/jobs/section-only";
-    const partialGroqDescription = [
+    const partialOpenRouterDescription = [
       "Key Responsibilities",
       "- Build accessible React and TypeScript interfaces for customer-facing dashboards.",
       "- Partner with product, design, and backend engineers to ship reliable product workflows.",
@@ -846,13 +860,13 @@ describe("parseJob", () => {
       if (url === `https://r.jina.ai/${jobUrl}`) {
         return okResponse(SECTIONED_DESCRIPTION, "text/plain");
       }
-      if (url === GROQ_URL) {
-        return groqResponse({
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
           companyName: "Example Labs",
           positionTitle: "Senior Frontend Engineer",
           salary: "",
           location: "Remote",
-          jobDescription: partialGroqDescription,
+          jobDescription: partialOpenRouterDescription,
           warnings: [],
         });
       }
@@ -867,12 +881,12 @@ describe("parseJob", () => {
     expect(result.jobDescription).toContain("About the role");
     expect(result.jobDescription).toContain("Required experience");
     expect(result.jobDescription).toContain("Benefits");
-    expect(result.jobDescription).not.toBe(partialGroqDescription);
-    expect(result.warnings).toContain("Groq returned incomplete jobDescription; using cleaned source text.");
+    expect(result.jobDescription).not.toBe(partialOpenRouterDescription);
+    expect(result.warnings).toContain("OpenRouter returned incomplete jobDescription; using cleaned source text.");
   });
 
-  it("restores non-English source text when Groq returns a contiguous excerpt", async () => {
-    initializeJobParser({ groqApiKey: "test-groq-key" });
+  it("restores non-English source text when OpenRouter returns a contiguous excerpt", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
     const jobUrl = "https://example.com/jobs/platforma-inzhener";
     const sourceDescription = [
       "Наша команда создаёт платформу для автоматизации сложных рабочих процессов крупных компаний.",
@@ -888,8 +902,8 @@ describe("parseJob", () => {
       if (url === `https://r.jina.ai/${jobUrl}`) {
         return okResponse(sourceDescription, "text/plain");
       }
-      if (url === GROQ_URL) {
-        return groqResponse({
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
           companyName: "Пример Лабс",
           positionTitle: "Инженер платформы",
           salary: "",
@@ -906,11 +920,11 @@ describe("parseJob", () => {
 
     expect(result.ok).toBe(true);
     expect(result.jobDescription).toBe(sourceDescription);
-    expect(result.warnings).toContain("Groq returned incomplete jobDescription; using cleaned source text.");
+    expect(result.warnings).toContain("OpenRouter returned incomplete jobDescription; using cleaned source text.");
   });
 
-  it("preserves source text beyond the Groq input limit", async () => {
-    initializeJobParser({ groqApiKey: "test-groq-key" });
+  it("preserves source text beyond the OpenRouter input limit", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
     const jobUrl = "https://example.com/jobs/long-description";
     const tailMarker = "COMPLETE_DESCRIPTION_TAIL_MARKER";
     const longDescription = [
@@ -927,8 +941,8 @@ describe("parseJob", () => {
       if (url === `https://r.jina.ai/${jobUrl}`) {
         return okResponse(longDescription, "text/plain");
       }
-      if (url === GROQ_URL) {
-        return groqResponse({
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
           companyName: "Example Labs",
           positionTitle: "Senior Frontend Engineer",
           salary: "",
@@ -946,22 +960,22 @@ describe("parseJob", () => {
     expect(result.ok).toBe(true);
     expect(result.jobDescription).toContain(tailMarker);
     expect(result.warnings).toContain(
-      "Groq input exceeded 20000 characters; using cleaned source text to preserve full coverage.",
+      "OpenRouter input exceeded 20000 characters; using cleaned source text to preserve full coverage.",
     );
-    const groqCall = fetchMock.mock.calls.find(([input]) => String(input) === GROQ_URL);
-    expect(String(groqCall?.[1]?.body)).not.toContain(tailMarker);
+    const openRouterCall = fetchMock.mock.calls.find(([input]) => String(input) === OPENROUTER_URL);
+    expect(String(openRouterCall?.[1]?.body)).not.toContain(tailMarker);
   });
 
-  it("adds a warning when Groq returns a section heading as the title", async () => {
-    initializeJobParser({ groqApiKey: "test-groq-key" });
+  it("adds a warning when OpenRouter returns a section heading as the title", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
     const jobUrl = "https://example.com/jobs/unclear";
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = String(input);
       if (url === `https://r.jina.ai/${jobUrl}`) {
         return okResponse(`${LONG_DESCRIPTION}\nMore details about product engineering and quality ownership.`, "text/plain");
       }
-      if (url === GROQ_URL) {
-        return groqResponse({
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
           companyName: "Example Labs",
           positionTitle: "Requirements",
           jobDescription: LONG_DESCRIPTION,
@@ -990,7 +1004,7 @@ describe("parseJob", () => {
     expect(result.location).toBe("");
   });
 
-  it("returns a Groq configuration error for generic URLs when the API key is missing", async () => {
+  it("returns an OpenRouter configuration error for generic URLs when the API key is missing", async () => {
     const jobUrl = "https://example.com/jobs/frontend-engineer";
     const fetchMock = vi.fn(async (input: unknown) => {
       if (String(input) === `https://r.jina.ai/${jobUrl}`) {
@@ -1006,7 +1020,7 @@ describe("parseJob", () => {
     const result = await parseJob(jobUrl);
 
     expect(result.ok).toBe(false);
-    expect(result.errorCode).toBe("GROQ_API_KEY_MISSING");
+    expect(result.errorCode).toBe("OPENROUTER_API_KEY_MISSING");
     expect(result.warnings.some((warning) => warning.includes("initializeJobParser"))).toBe(true);
   });
 });

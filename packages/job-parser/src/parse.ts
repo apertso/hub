@@ -1,4 +1,4 @@
-import { extractJobFieldsWithGroq, initializeGroqClient, resetGroqClientForTests } from "./llm/groq.js";
+import { extractJobFieldsWithOpenRouter, initializeOpenRouterClient, resetOpenRouterClientForTests } from "./llm/openrouter.js";
 import { fetchDirectText } from "./sources/direct.js";
 import { fetchGreenhouseJob } from "./sources/greenhouse.js";
 import { fetchHhJob } from "./sources/hh.js";
@@ -98,12 +98,12 @@ function buildAttempts(url: string): ParseAttempt[] {
 
   attempts.push({
     source: "jina",
-    run: async () => extractJobFieldsWithGroq(await fetchJinaText(url)),
+    run: async () => extractJobFieldsWithOpenRouter(await fetchJinaText(url)),
   });
 
   attempts.push({
     source: "direct",
-    run: async () => extractJobFieldsWithGroq(await fetchDirectText(url)),
+    run: async () => extractJobFieldsWithOpenRouter(await fetchDirectText(url)),
   });
 
   return attempts;
@@ -114,9 +114,9 @@ function fallbackWarnings(failures: AttemptFailure[]): string[] {
 }
 
 function selectFinalErrorCode(failures: AttemptFailure[]): string {
-  const groqKeyFailure = failures.find((failure) => failure.code === "GROQ_API_KEY_MISSING");
-  if (groqKeyFailure) {
-    return groqKeyFailure.code;
+  const openRouterKeyFailure = failures.find((failure) => failure.code === "OPENROUTER_API_KEY_MISSING");
+  if (openRouterKeyFailure) {
+    return openRouterKeyFailure.code;
   }
 
   return failures.at(-1)?.code ?? "PARSE_FAILED";
@@ -131,11 +131,11 @@ function buildFinalErrorMessage(failures: AttemptFailure[]): string {
 }
 
 export function initializeJobParser(config: JobParserConfig): void {
-  initializeGroqClient(config);
+  initializeOpenRouterClient(config);
 }
 
 export function resetJobParserForTests(): void {
-  resetGroqClientForTests();
+  resetOpenRouterClientForTests();
 }
 
 export async function parseJob(url: string): Promise<JobParseResult> {

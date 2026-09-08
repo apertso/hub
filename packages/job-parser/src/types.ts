@@ -31,9 +31,21 @@ export type JobParseResult = ParsedJobFields & {
   errorMessage?: string;
 };
 
+export type OpenRouterRequestConfig = {
+  model?: string;
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  max_tokens?: number;
+  reasoning?: unknown;
+  chat_template_kwargs?: unknown;
+  [key: string]: unknown;
+};
+
 export type JobParserConfig = {
   openRouterApiKey: string;
   llmModel?: string;
+  openRouter?: OpenRouterRequestConfig;
 };
 
 export class JobParserError extends Error {

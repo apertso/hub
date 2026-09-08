@@ -17,9 +17,30 @@ const DEFAULT_TOP_K = 20;
 const DEFAULT_MAX_TOKENS = 8_192;
 const DEFAULT_TIMEOUT_MS = 90_000;
 
+const PARSER_OWNED_OPENROUTER_KEYS = new Set([
+  'messages',
+  'response_format',
+  'stream',
+]);
+
+const DEFAULT_OPENROUTER_REQUEST: Record<string, unknown> = {
+  model: DEFAULT_MODEL,
+  temperature: DEFAULT_TEMPERATURE,
+  top_p: DEFAULT_TOP_P,
+  top_k: DEFAULT_TOP_K,
+  max_tokens: DEFAULT_MAX_TOKENS,
+  reasoning: {
+    enabled: false,
+    effort: 'none',
+  },
+  chat_template_kwargs: {
+    enable_thinking: false,
+  },
+};
+
 export type OpenRouterClient = {
   apiKey: string;
-  model: string;
+  requestJson: Record<string, unknown>;
 };
 
 let initializedOpenRouterClient: OpenRouterClient | null = null;
@@ -27,10 +48,6 @@ let initializedOpenRouterClient: OpenRouterClient | null = null;
 type OpenRouterJsonRequest = {
   systemPrompt: string;
   userPrompt: string;
-  temperature?: number;
-  topP?: number;
-  topK?: number;
-  maxTokens?: number;
   timeoutMs?: number;
 };
 
@@ -113,6 +130,36 @@ function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
   return undefined;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function resolveOpenRouterModel(
+  extra: Record<string, unknown>,
+  config: JobParserConfig,
+): string {
+  const modelFromJson = typeof extra.model === 'string' ? extra.model.trim() : '';
+  return modelFromJson || config.llmModel?.trim() || DEFAULT_MODEL;
+}
+
+function createOpenRouterRequestJson(config: JobParserConfig): Record<string, unknown> {
+  const extra = isPlainObject(config.openRouter) ? { ...config.openRouter } : {};
+  const merged: Record<string, unknown> = {
+    ...DEFAULT_OPENROUTER_REQUEST,
+    ...extra,
+    model: resolveOpenRouterModel(extra, config),
+  };
+
+  const requestJson: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(merged)) {
+    if (value === undefined || PARSER_OWNED_OPENROUTER_KEYS.has(key)) {
+      continue;
+    }
+    requestJson[key] = value;
+  }
+  return requestJson;
+}
+
 function createOpenRouterClient(config: JobParserConfig): OpenRouterClient {
   const apiKey = config.openRouterApiKey?.trim();
   if (!apiKey) {
@@ -124,7 +171,7 @@ function createOpenRouterClient(config: JobParserConfig): OpenRouterClient {
 
   return {
     apiKey,
-    model: config.llmModel?.trim() || DEFAULT_MODEL,
+    requestJson: createOpenRouterRequestJson(config),
   };
 }
 
@@ -140,7 +187,7 @@ function getInitializedOpenRouterClient(): OpenRouterClient {
   if (!initializedOpenRouterClient) {
     throw new JobParserError(
       'OPENROUTER_API_KEY_MISSING',
-      'Job parser is not initialized. Call initializeJobParser({ openRouterApiKey, llmModel? }) before parseJob().',
+      'Job parser is not initialized. Call initializeJobParser({ openRouterApiKey, openRouter? }) before parseJob().',
     );
   }
 
@@ -161,20 +208,7 @@ async function requestOpenRouterJsonObject<T extends Record<string, unknown>>(
         },
         signal: timeoutSignal(request.timeoutMs ?? DEFAULT_TIMEOUT_MS),
         body: JSON.stringify({
-          model: client.model,
-          temperature: request.temperature ?? DEFAULT_TEMPERATURE,
-          top_p: request.topP ?? DEFAULT_TOP_P,
-          top_k: request.topK ?? DEFAULT_TOP_K,
-          ...(request.maxTokens !== undefined
-            ? { max_tokens: request.maxTokens }
-            : {}),
-          reasoning: {
-            enabled: false,
-            effort: 'none',
-          },
-          chat_template_kwargs: {
-            enable_thinking: false,
-          },
+          ...client.requestJson,
           response_format: { type: 'json_object' },
           messages: [
             {
@@ -246,10 +280,6 @@ export async function extractJobFieldsWithOpenRouter(
   const client = getInitializedOpenRouterClient();
   const truncatedText = rawText.slice(0, TEXT_LIMIT);
   const payload = await requestOpenRouterJsonObject<Record<string, unknown>>(client, {
-    temperature: DEFAULT_TEMPERATURE,
-    topP: DEFAULT_TOP_P,
-    topK: DEFAULT_TOP_K,
-    maxTokens: DEFAULT_MAX_TOKENS,
     systemPrompt:
       'You extract job posting fields. Return only one valid JSON object with no markdown or explanations.',
     userPrompt: [

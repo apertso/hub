@@ -4,5 +4,6 @@ export type {
   JobParserConfig,
   JobParseResult,
   JobParseSource,
+  OpenRouterRequestConfig,
   ParsedJobFields,
 } from "./types.js";

@@ -13,11 +13,21 @@ import { initializeJobParser, parseJob } from '@hub/job-parser';
 
 initializeJobParser({
   openRouterApiKey: process.env.OPENROUTER_API_KEY ?? '',
-  llmModel: 'inclusionai/ling-3.0-flash', // optional
+  openRouter: {
+    model: 'inclusionai/ling-3.0-flash',
+    temperature: 0.2,
+    top_p: 0.95,
+    top_k: 20,
+    max_tokens: 8192,
+    reasoning: { enabled: false, effort: 'none' },
+    chat_template_kwargs: { enable_thinking: false },
+  },
 });
 
 const result = await parseJob('https://example.com/jobs/frontend-engineer');
 ```
+
+`openRouter` is merged into the OpenRouter chat-completions JSON. Sampling, reasoning, provider routing, and other request fields can be set there; `messages`, `response_format`, and `stream` stay owned by the parser. `llmModel` still works as a shorthand for `openRouter.model`.
 
 ## skleika
 

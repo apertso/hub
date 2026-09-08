@@ -847,6 +847,108 @@ describe("parseJob", () => {
     expect(result.warnings.some((warning) => warning.includes("jina attempt failed"))).toBe(true);
   });
 
+  it("merges OpenRouter JSON config into the chat-completions request", async () => {
+    initializeJobParser({
+      openRouterApiKey: "test-openrouter-key",
+      llmModel: "openai/gpt-4o-mini",
+      openRouter: {
+        model: "anthropic/claude-sonnet-4",
+        temperature: 0,
+        top_p: 1,
+        provider: { order: ["Anthropic"] },
+        messages: [{ role: "user", content: "ignore me" }],
+        response_format: { type: "text" },
+        stream: true,
+      },
+    });
+    const jobUrl = "https://example.com/jobs/frontend-engineer";
+    const fetchMock = vi.fn(async (input: unknown, _init?: RequestInit) => {
+      const url = String(input);
+      if (url === `https://r.jina.ai/${jobUrl}`) {
+        return okResponse(LONG_DESCRIPTION, "text/plain");
+      }
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
+          companyName: "Example Labs",
+          positionTitle: "Frontend Engineer",
+          salary: "",
+          location: "",
+          jobDescription: LONG_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(true);
+    const openRouterCall = fetchMock.mock.calls.find(([input]) => String(input) === OPENROUTER_URL);
+    const openRouterBody = JSON.parse(openRouterCall?.[1]?.body as string) as {
+      model: string;
+      temperature: number;
+      top_p: number;
+      top_k: number;
+      max_tokens: number;
+      provider: { order: string[] };
+      stream?: boolean;
+      response_format: { type: string };
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(openRouterBody.model).toBe("anthropic/claude-sonnet-4");
+    expect(openRouterBody.temperature).toBe(0);
+    expect(openRouterBody.top_p).toBe(1);
+    expect(openRouterBody.top_k).toBe(20);
+    expect(openRouterBody.max_tokens).toBe(8_192);
+    expect(openRouterBody.provider).toEqual({ order: ["Anthropic"] });
+    expect(openRouterBody.stream).toBeUndefined();
+    expect(openRouterBody.response_format).toEqual({ type: "json_object" });
+    expect(openRouterBody.messages).toEqual([
+      {
+        role: "system",
+        content: expect.stringContaining("You extract job posting fields."),
+      },
+      {
+        role: "user",
+        content: expect.stringContaining(LONG_DESCRIPTION),
+      },
+    ]);
+  });
+
+  it("uses llmModel when openRouter.model is omitted", async () => {
+    initializeJobParser({
+      openRouterApiKey: "test-openrouter-key",
+      llmModel: "openai/gpt-4o-mini",
+    });
+    const jobUrl = "https://example.com/jobs/frontend-engineer";
+    const fetchMock = vi.fn(async (input: unknown, _init?: RequestInit) => {
+      const url = String(input);
+      if (url === `https://r.jina.ai/${jobUrl}`) {
+        return okResponse(LONG_DESCRIPTION, "text/plain");
+      }
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
+          companyName: "Example Labs",
+          positionTitle: "Frontend Engineer",
+          salary: "",
+          location: "",
+          jobDescription: LONG_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(true);
+    const openRouterCall = fetchMock.mock.calls.find(([input]) => String(input) === OPENROUTER_URL);
+    const openRouterBody = JSON.parse(openRouterCall?.[1]?.body as string) as { model: string };
+    expect(openRouterBody.model).toBe("openai/gpt-4o-mini");
+  });
+
   it("falls back to cleaned source text when OpenRouter returns only one description section", async () => {
     initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
     const jobUrl = "https://example.com/jobs/section-only";

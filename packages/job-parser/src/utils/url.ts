@@ -11,6 +11,11 @@ export type LeverJobTarget = {
   apiBase: string;
 };
 
+export type AshbyJobTarget = {
+  boardToken: string;
+  jobId: string;
+};
+
 function isLinkedInHost(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
   return normalized === "linkedin.com" || normalized.endsWith(".linkedin.com");
@@ -35,6 +40,7 @@ export function isTeamtailorHost(hostname: string): boolean {
 }
 
 const LEVER_POSTING_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ASHBY_JOB_ID_PATTERN = LEVER_POSTING_ID_PATTERN;
 
 export function isHhHost(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
@@ -107,6 +113,43 @@ export function isLeverUrl(url: string): boolean {
     return isLeverHost(new URL(url.trim()).hostname);
   } catch {
     return false;
+  }
+}
+
+function isAshbyHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === "jobs.ashbyhq.com" || normalized === "ashbyhq.com" || normalized.endsWith(".ashbyhq.com");
+}
+
+export function isAshbyUrl(url: string): boolean {
+  return parseAshbyJobTarget(url) !== null;
+}
+
+export function parseAshbyJobTarget(url: string): AshbyJobTarget | null {
+  try {
+    const parsed = new URL(url);
+    if (!isAshbyHost(parsed.hostname)) {
+      return null;
+    }
+
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    if (parts.length < 2) {
+      return null;
+    }
+
+    const boardToken = parts[0]?.trim();
+    const jobId = parts[1]?.trim();
+    if (!boardToken || !jobId || boardToken.toLowerCase() === "api") {
+      return null;
+    }
+
+    if (!ASHBY_JOB_ID_PATTERN.test(jobId)) {
+      return null;
+    }
+
+    return { boardToken, jobId };
+  } catch {
+    return null;
   }
 }
 
@@ -208,6 +251,10 @@ export function detectSpecificSource(url: string): Exclude<JobParseSource, "jina
 
   if (isTeamtailorUrl(url)) {
     return "teamtailor";
+  }
+
+  if (parseAshbyJobTarget(url)) {
+    return "ashby";
   }
 
   return null;

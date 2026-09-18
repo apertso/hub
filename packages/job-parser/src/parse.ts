@@ -6,6 +6,7 @@ import { fetchLeverJob } from "./sources/lever.js";
 import { fetchJinaText } from "./sources/jina.js";
 import { fetchLinkedInJob } from "./sources/linkedin.js";
 import { fetchTeamtailorJob } from "./sources/teamtailor.js";
+import { fetchAshbyJob } from "./sources/ashby.js";
 import {
   JobParserError,
   type JobParseResult,
@@ -150,6 +151,13 @@ function buildAttempts(url: string): ParseAttempt[] {
     attempts.push({
       source: "teamtailor",
       run: () => fetchTeamtailorJob(url),
+    });
+  }
+
+  if (specificSource === "ashby") {
+    attempts.push({
+      source: "ashby",
+      run: () => fetchAshbyJob(url),
     });
   }
 

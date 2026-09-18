@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initializeJobParser, isJobParseSource, JOB_PARSE_SOURCES, parseJob } from "../src/index.js";
 import { resetJobParserForTests } from "../src/parse.js";
-import { detectSpecificSource, isHhUrl, isLeverUrl, isTeamtailorUrl } from "../src/utils/url.js";
+import { detectSpecificSource, isAshbyUrl, isHhUrl, isLeverUrl, isTeamtailorUrl } from "../src/utils/url.js";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const LINKEDIN_URL = "https://www.linkedin.com/jobs/view/4402429247/";
@@ -10,6 +10,7 @@ const GREENHOUSE_URL = "https://job-boards.eu.greenhouse.io/brainrocketltd/jobs/
 const LEVER_URL = "https://jobs.lever.co/binance/8a4660a3-28de-41e6-bcaf-ef404c481338";
 const HH_URL = "https://nn.hh.ru/vacancy/133066281";
 const TEAMTAILOR_URL = "https://interventure.teamtailor.com/jobs/7674883-senior-ai-native-fullstack-engineer-ringier-team";
+const ASHBY_URL = "https://jobs.ashbyhq.com/improbable/f5e52200-8498-4f73-bbcb-5452a34dfa82";
 
 const LONG_DESCRIPTION = [
   "About the job",
@@ -261,11 +262,13 @@ describe("parseJob", () => {
       "hh",
       "lever",
       "teamtailor",
+      "ashby",
       "jina",
       "direct",
     ]);
     expect(isJobParseSource("lever")).toBe(true);
     expect(isJobParseSource("teamtailor")).toBe(true);
+    expect(isJobParseSource("ashby")).toBe(true);
     expect(isJobParseSource("manual")).toBe(false);
     expect(isJobParseSource(null)).toBe(false);
   });
@@ -792,6 +795,137 @@ describe("parseJob", () => {
     expect(result.companyName).toBe("InterVenture");
     expect(result.positionTitle).toBe("Senior AI-Native Fullstack Engineer - Ringier Team");
     expect(result.warnings.some((warning) => warning.includes("teamtailor attempt failed"))).toBe(true);
+  });
+
+  it("detects jobs.ashbyhq.com posting URLs as the Ashby source", () => {
+    expect(isAshbyUrl(ASHBY_URL)).toBe(true);
+    expect(isAshbyUrl(`${ASHBY_URL}/application`)).toBe(true);
+    expect(isAshbyUrl("https://jobs.ashbyhq.com/improbable")).toBe(false);
+    expect(isAshbyUrl("https://example.com/jobs/f5e52200-8498-4f73-bbcb-5452a34dfa82")).toBe(false);
+    expect(detectSpecificSource(ASHBY_URL)).toBe("ashby");
+  });
+
+  it("uses the Ashby GraphQL posting API before generic fallbacks", async () => {
+    const descriptionHtml = [
+      "<h2>About Bolter</h2>",
+      "<p>Bolter is an AI agent platform built to help people get real work done without stitching tools together.</p>",
+      "<p>As Bolter's product engineer, you will own the full lifecycle of the product from prototyping to production.</p>",
+      "<p>Requirements include production TypeScript experience, strong product sense, and clear communication.</p>",
+    ].join("");
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input).startsWith("https://jobs.ashbyhq.com/api/non-user-graphql")) {
+        return okJson({
+          data: {
+            jobPosting: {
+              id: "f5e52200-8498-4f73-bbcb-5452a34dfa82",
+              title: "Product Engineer",
+              locationName: "Remote - International",
+              workplaceType: "Remote",
+              employmentType: "FullTime",
+              compensationTierSummary: "",
+              descriptionHtml,
+            },
+          },
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(ASHBY_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("ashby");
+    expect(result.companyName).toBe("Improbable");
+    expect(result.positionTitle).toBe("Product Engineer");
+    expect(result.location).toBe("Remote - International");
+    expect(result.jobDescription).toContain("Bolter is an AI agent platform");
+    expect(result.jobDescription).toContain("product engineer");
+    expect(result.jobDescription).not.toContain("Title:");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back from Ashby GraphQL to the public job board API", async () => {
+    const descriptionPlain = [
+      "Bolter is an AI agent platform built to help people get real work done without stitching tools together.",
+      "As Bolter's product engineer, you will own the full lifecycle of the product from prototyping to production.",
+      "Requirements include production TypeScript experience, strong product sense, and clear communication.",
+    ].join(" ");
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.startsWith("https://jobs.ashbyhq.com/api/non-user-graphql")) {
+        return okJson({ data: { jobPosting: null } });
+      }
+      if (url === "https://api.ashbyhq.com/posting-api/job-board/improbable") {
+        return okJson({
+          apiVersion: "1",
+          jobs: [
+            {
+              id: "f5e52200-8498-4f73-bbcb-5452a34dfa82",
+              title: "Product Engineer",
+              location: "Remote - International",
+              workplaceType: "Remote",
+              descriptionHtml: "",
+              descriptionPlain,
+            },
+          ],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(ASHBY_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("ashby");
+    expect(result.companyName).toBe("Improbable");
+    expect(result.jobDescription).toContain("Bolter is an AI agent platform");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back from Ashby to Jina and normalizes through OpenRouter", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.startsWith("https://jobs.ashbyhq.com/api/non-user-graphql")) {
+        return new Response("", { status: 500 });
+      }
+      if (url === "https://api.ashbyhq.com/posting-api/job-board/improbable") {
+        return new Response("", { status: 500 });
+      }
+      if (url === `https://r.jina.ai/${ASHBY_URL}`) {
+        return okResponse(`
+          Title: Product Engineer
+          URL Source: ${ASHBY_URL}
+          Markdown Content:
+          # Product Engineer
+          Bolter is an AI agent platform built to help people get real work done without stitching tools together.
+          As Bolter's product engineer, you will own the full lifecycle of the product from prototyping to production.
+          Requirements include production TypeScript experience, strong product sense, and clear communication.
+        `);
+      }
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
+          companyName: "Improbable",
+          positionTitle: "Product Engineer",
+          salary: "",
+          location: "Remote",
+          jobDescription: LONG_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(ASHBY_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("jina");
+    expect(result.companyName).toBe("Improbable");
+    expect(result.positionTitle).toBe("Product Engineer");
+    expect(result.warnings.some((warning) => warning.includes("ashby attempt failed"))).toBe(true);
   });
 
   it("accepts a non-English generic job from Jina without requiring corroboration", async () => {

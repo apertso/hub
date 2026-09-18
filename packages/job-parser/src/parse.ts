@@ -13,6 +13,7 @@ import {
   type JobParserConfig,
   type ParsedJobFields,
 } from "./types.js";
+import { normalizeWhitespace } from "./utils/text.js";
 import { detectSpecificSource, normalizeJobUrl } from "./utils/url.js";
 import { validateParsedJob } from "./validation/validate.js";
 
@@ -25,6 +26,13 @@ type AttemptFailure = {
   source: JobParseSource;
   code: string;
   message: string;
+};
+
+type PartialCandidate = {
+  source: JobParseSource;
+  fields: ParsedJobFields;
+  validationWarnings: string[];
+  missingFields: string[];
 };
 
 function stringifyError(error: unknown): string {
@@ -55,6 +63,55 @@ function emptyResult(
     errorCode: errorCodeValue,
     errorMessage,
   };
+}
+
+function buildSuccessResult(
+  url: string,
+  source: JobParseSource,
+  fields: ParsedJobFields,
+  warnings: string[],
+): JobParseResult {
+  return {
+    ok: true,
+    url,
+    source,
+    companyName: fields.companyName,
+    positionTitle: fields.positionTitle,
+    salary: fields.salary,
+    location: fields.location,
+    jobDescription: fields.jobDescription,
+    warnings: [...new Set(warnings)],
+  };
+}
+
+function missingCoreFields(fields: ParsedJobFields): string[] {
+  const missing: string[] = [];
+  if (!normalizeWhitespace(fields.companyName)) {
+    missing.push("company name");
+  }
+  if (!normalizeWhitespace(fields.positionTitle)) {
+    missing.push("position title");
+  }
+  if (!normalizeWhitespace(fields.jobDescription)) {
+    missing.push("job description");
+  }
+  return missing;
+}
+
+function incompleteExtractionWarning(candidate: PartialCandidate): string {
+  return `${candidate.source} attempt returned an incomplete extraction: missing ${candidate.missingFields.join(", ")}.`;
+}
+
+function selectPartialCandidate(candidates: PartialCandidate[]): PartialCandidate | null {
+  let selected: PartialCandidate | null = null;
+  for (const candidate of candidates) {
+    // Validated candidates always carry a description, so fewer missing core fields
+    // means more present identity fields. Ties keep the earlier source.
+    if (!selected || candidate.missingFields.length < selected.missingFields.length) {
+      selected = candidate;
+    }
+  }
+  return selected;
 }
 
 function buildAttempts(url: string): ParseAttempt[] {
@@ -152,6 +209,7 @@ export async function parseJob(url: string): Promise<JobParseResult> {
   }
 
   const failures: AttemptFailure[] = [];
+  const partialCandidates: PartialCandidate[] = [];
   const attempts = buildAttempts(normalizedUrl);
 
   for (const attempt of attempts) {
@@ -162,17 +220,22 @@ export async function parseJob(url: string): Promise<JobParseResult> {
         throw new JobParserError(validation.errorCode, validation.errorMessage ?? "Parsed job is invalid.");
       }
 
-      return {
-        ok: true,
-        url: normalizedUrl,
+      const missingFields = missingCoreFields(fields);
+      if (missingFields.length === 0) {
+        return buildSuccessResult(normalizedUrl, attempt.source, fields, [
+          ...fields.warnings,
+          ...validation.warnings,
+          ...partialCandidates.map(incompleteExtractionWarning),
+          ...fallbackWarnings(failures),
+        ]);
+      }
+
+      partialCandidates.push({
         source: attempt.source,
-        companyName: fields.companyName,
-        positionTitle: fields.positionTitle,
-        salary: fields.salary,
-        location: fields.location,
-        jobDescription: fields.jobDescription,
-        warnings: [...new Set([...fields.warnings, ...validation.warnings, ...fallbackWarnings(failures)])],
-      };
+        fields,
+        validationWarnings: validation.warnings,
+        missingFields,
+      });
     } catch (error) {
       failures.push({
         source: attempt.source,
@@ -180,6 +243,18 @@ export async function parseJob(url: string): Promise<JobParseResult> {
         message: stringifyError(error),
       });
     }
+  }
+
+  const selectedCandidate = selectPartialCandidate(partialCandidates);
+  if (selectedCandidate) {
+    return buildSuccessResult(normalizedUrl, selectedCandidate.source, selectedCandidate.fields, [
+      ...selectedCandidate.fields.warnings,
+      ...selectedCandidate.validationWarnings,
+      ...partialCandidates
+        .filter((candidate) => candidate !== selectedCandidate)
+        .map(incompleteExtractionWarning),
+      ...fallbackWarnings(failures),
+    ]);
   }
 
   return emptyResult(

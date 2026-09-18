@@ -29,6 +29,8 @@ const result = await parseJob('https://example.com/jobs/frontend-engineer');
 
 `openRouter` is merged into the OpenRouter chat-completions JSON. Sampling, reasoning, provider routing, and other request fields can be set there; `messages`, `response_format`, and `stream` stay owned by the parser. `llmModel` still works as a shorthand for `openRouter.model`.
 
+`parseJob()` tries its sources in order and returns the first result that has a company name, a position title, and a description. When an accepted result is missing the company name or the position title, the remaining sources are still tried, which costs one more fetch and possibly another model call for that result only. `salary` and `location` are optional and never trigger another attempt. If no source supplies complete identity data, the parser returns the best partial result with `ok: true`, so callers that need every field should still check them.
+
 ## skleika
 
 `skleika` exports source files into `project_code.txt` in the current working directory.

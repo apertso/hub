@@ -143,6 +143,88 @@ const TEAMTAILOR_DOM_FIXTURE = `
   </html>
 `;
 
+const WORK_AM_URL = "https://work.am/en/job/289/190/viva-armenia-frontend-developer";
+
+// Compact shape of the vacancy inspected at WORK_AM_URL on 2026-09-18: the Jina body
+// carries the description without the employer, while the page HTML carries the
+// company name and the document title.
+const WORK_AM_RESPONSIBILITIES = [
+  "Review existing React/frontend source code and architecture.",
+  "Receive repositories and establish local development environment.",
+  "Understand frontend modules, components and routing.",
+  "Review API integrations and authentication/authorization flows.",
+  "Review state-management approach and application configuration.",
+  "Review dependencies, package management and build tooling.",
+  "Understand CI/CD and frontend deployment process.",
+  "Identify technical debt, obsolete dependencies and known defects.",
+  "Maintain and enhance existing React-based functionality.",
+  "Develop new interfaces and reusable frontend components.",
+  "Participate in frontend architecture modernization.",
+  "Implement the approved My Viva design system.",
+  "Integrate frontend functionality with backend APIs.",
+  "Improve performance, maintainability and code quality.",
+  "Implement responsive and accessible interfaces.",
+  "Perform peer code reviews.",
+  "Troubleshoot frontend production issues.",
+  "Perform root-cause analysis and defect resolution.",
+  "Support production deployments and hotfixes.",
+  "Address browser/device compatibility issues.",
+  "Monitor and improve frontend performance.",
+];
+
+const WORK_AM_DELIVERABLES = [
+  "Independently buildable/deployable React solution.",
+  "Frontend architecture/dependency documentation.",
+  "Reusable component library.",
+  "Implementation of approved UI/UX designs.",
+  "Technical-debt register.",
+  "Production defect resolution.",
+  "Ongoing frontend enhancements.",
+];
+
+const WORK_AM_HEADLINE =
+  "JOB DESCRIPTION: The Frontend Developer-React will take ownership of applicable existing My Viva web/frontend components and develop, modernize and support React-based customer and internal interfaces.";
+const WORK_AM_FINAL_RESPONSIBILITY = `- ${WORK_AM_RESPONSIBILITIES.at(-1)}`;
+const WORK_AM_FINAL_DELIVERABLE = `- ${WORK_AM_DELIVERABLES.at(-1)}`;
+
+const WORK_AM_DESCRIPTION = [
+  WORK_AM_HEADLINE,
+  "JOB RESPONSIBILITIES:",
+  ...WORK_AM_RESPONSIBILITIES.map((line) => `- ${line}`),
+  "Key Deliverables",
+  ...WORK_AM_DELIVERABLES.map((line) => `- ${line}`),
+].join("\n");
+
+const WORK_AM_JINA_TEXT = [
+  "Title: Frontend Developer",
+  `URL Source: ${WORK_AM_URL}`,
+  "Markdown Content:",
+  WORK_AM_DESCRIPTION,
+].join("\n");
+
+const WORK_AM_HTML_FIXTURE = `
+  <html>
+    <head>
+      <title>Frontend Developer</title>
+      <meta property="og:title" content="Frontend Developer" />
+      <meta property="og:site_name" content="work.am" />
+    </head>
+    <body>
+      <header>Jobs Companies Pricing</header>
+      <main>
+        <a class="company-name" href="/en/company/289">Viva Armenia</a>
+        <span class="active-till">Active till 22 Sep, 2026</span>
+        <div class="job-description">
+          <p>${WORK_AM_HEADLINE}</p>
+          <p>JOB RESPONSIBILITIES:</p>
+          <ul>${WORK_AM_RESPONSIBILITIES.map((line) => `<li>${line}</li>`).join("")}</ul>
+          <h3>Key Deliverables</h3>
+          <ul>${WORK_AM_DELIVERABLES.map((line) => `<li>${line}</li>`).join("")}</ul>
+        </div>
+      </main>
+    </body>
+  </html>
+`;
 function okResponse(body: string, contentType = "text/html; charset=utf-8"): Response {
   return new Response(body, {
     status: 200,
@@ -1095,6 +1177,381 @@ describe("parseJob", () => {
     expect(result.warnings.some((warning) => warning.includes("section heading"))).toBe(true);
   });
 
+  it("retries the direct source when the Jina extraction omits the company (Work.am)", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
+    const modelPrompts: string[] = [];
+    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `https://r.jina.ai/${WORK_AM_URL}`) {
+        return okResponse(WORK_AM_JINA_TEXT, "text/plain; charset=utf-8");
+      }
+      if (url === WORK_AM_URL) {
+        return okResponse(WORK_AM_HTML_FIXTURE);
+      }
+      if (url === OPENROUTER_URL) {
+        const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
+        modelPrompts.push(body.messages[1]?.content ?? "");
+        if (modelPrompts.length === 1) {
+          return openRouterResponse({
+            companyName: "",
+            positionTitle: "Frontend Developer",
+            salary: "",
+            location: "",
+            jobDescription: WORK_AM_DESCRIPTION,
+            warnings: [],
+          });
+        }
+        return openRouterResponse({
+          companyName: "Viva Armenia",
+          positionTitle: "Frontend Developer",
+          salary: "",
+          location: "Yerevan, Armenia",
+          jobDescription: WORK_AM_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(WORK_AM_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("direct");
+    expect(result.companyName).toBe("Viva Armenia");
+    expect(result.positionTitle).toBe("Frontend Developer");
+    expect(result.jobDescription).toContain(WORK_AM_FINAL_RESPONSIBILITY);
+    expect(result.jobDescription).toContain(WORK_AM_FINAL_DELIVERABLE);
+    expect(result.warnings).toContain("jina attempt returned an incomplete extraction: missing company name.");
+    expect(result.warnings).not.toContain("Company name was not found.");
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      `https://r.jina.ai/${WORK_AM_URL}`,
+      OPENROUTER_URL,
+      WORK_AM_URL,
+      OPENROUTER_URL,
+    ]);
+    expect(modelPrompts).toHaveLength(2);
+    expect(modelPrompts[0]).not.toContain("Viva Armenia");
+    expect(modelPrompts[1]).toContain("Viva Armenia");
+    expect(modelPrompts[1]).toContain("Frontend Developer");
+    expect(modelPrompts[1]).toContain(WORK_AM_FINAL_RESPONSIBILITY);
+    expect(modelPrompts[1]).toContain(WORK_AM_FINAL_DELIVERABLE);
+  });
+
+  it.each([
+    { label: "a missing company name", companyName: "", positionTitle: "Frontend Developer", missing: "company name" },
+    { label: "a missing position title", companyName: "Example Labs", positionTitle: "", missing: "position title" },
+    { label: "missing company and position title", companyName: "", positionTitle: "", missing: "company name, position title" },
+    { label: "whitespace-only identity fields", companyName: "   ", positionTitle: " \n\t ", missing: "company name, position title" },
+  ])("tries the remaining sources when the Jina result has $label", async ({ companyName, positionTitle, missing }) => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
+    const jobUrl = "https://example.com/jobs/inzhener-interfeysov";
+    let modelCalls = 0;
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === `https://r.jina.ai/${jobUrl}`) {
+        return okResponse(LONG_DESCRIPTION, "text/plain");
+      }
+      if (url === jobUrl) {
+        return okResponse(`<main>${LONG_DESCRIPTION}</main>`);
+      }
+      if (url === OPENROUTER_URL) {
+        modelCalls += 1;
+        if (modelCalls === 1) {
+          return openRouterResponse({
+            companyName,
+            positionTitle,
+            jobDescription: LONG_DESCRIPTION,
+            warnings: [],
+          });
+        }
+        return openRouterResponse({
+          companyName: "Пример Лабс",
+          positionTitle: "Инженер интерфейсов",
+          salary: "",
+          location: "Удалённо",
+          jobDescription: LONG_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("direct");
+    expect(result.companyName).toBe("Пример Лабс");
+    expect(result.positionTitle).toBe("Инженер интерфейсов");
+    expect(result.jobDescription).toBe(LONG_DESCRIPTION);
+    expect(result.warnings).toContain(`jina attempt returned an incomplete extraction: missing ${missing}.`);
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      `https://r.jina.ai/${jobUrl}`,
+      OPENROUTER_URL,
+      jobUrl,
+      OPENROUTER_URL,
+    ]);
+  });
+
+  it("does not try the direct source when the Jina result is complete without salary or location", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
+    const jobUrl = "https://example.com/jobs/frontend-engineer";
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === `https://r.jina.ai/${jobUrl}`) {
+        return okResponse(LONG_DESCRIPTION, "text/plain");
+      }
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
+          companyName: "Example Labs",
+          positionTitle: "Requirements",
+          salary: "",
+          location: "",
+          jobDescription: LONG_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("jina");
+    expect(result.salary).toBe("");
+    expect(result.location).toBe("");
+    expect(result.warnings).toContain("Position title looks like a section heading: Requirements.");
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      `https://r.jina.ai/${jobUrl}`,
+      OPENROUTER_URL,
+    ]);
+  });
+
+  it("returns the best partial candidate when a later attempt fails", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
+    const jobUrl = "https://example.com/jobs/partial-company";
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === `https://r.jina.ai/${jobUrl}`) {
+        return okResponse(LONG_DESCRIPTION, "text/plain");
+      }
+      if (url === jobUrl) {
+        return new Response("", { status: 500 });
+      }
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
+          companyName: "",
+          positionTitle: "Frontend Developer",
+          jobDescription: LONG_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("jina");
+    expect(result.companyName).toBe("");
+    expect(result.positionTitle).toBe("Frontend Developer");
+    expect(result.jobDescription).toBe(LONG_DESCRIPTION);
+    expect(result.warnings).toContain("Company name was not found.");
+    expect(result.warnings).toContain("direct attempt failed: Direct fetch returned HTTP 500.");
+    expect(result.errorCode).toBeUndefined();
+    expect(result.errorMessage).toBeUndefined();
+  });
+
+  it("returns the best partial candidate when a later attempt returns unusable model output", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
+    const jobUrl = "https://example.com/jobs/partial-title";
+    let modelCalls = 0;
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === `https://r.jina.ai/${jobUrl}`) {
+        return okResponse(LONG_DESCRIPTION, "text/plain");
+      }
+      if (url === jobUrl) {
+        return okResponse(`<main>${LONG_DESCRIPTION}</main>`);
+      }
+      if (url === OPENROUTER_URL) {
+        modelCalls += 1;
+        if (modelCalls === 1) {
+          return openRouterResponse({
+            companyName: "Example Labs",
+            positionTitle: "",
+            jobDescription: LONG_DESCRIPTION,
+            warnings: [],
+          });
+        }
+        return okJson({ choices: [{ message: { content: "unusable model output" } }] });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("jina");
+    expect(result.companyName).toBe("Example Labs");
+    expect(result.positionTitle).toBe("");
+    expect(result.warnings).toContain("Position title was not found.");
+    expect(result.warnings).toContain("direct attempt failed: OpenRouter response does not contain a JSON object.");
+    expect(result.errorCode).toBeUndefined();
+    expect(result.errorMessage).toBeUndefined();
+  });
+
+  it("keeps the earlier partial candidate on a tie and does not merge complementary fields", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
+    const jobUrl = "https://example.com/jobs/complementary-partials";
+    let modelCalls = 0;
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === `https://r.jina.ai/${jobUrl}`) {
+        return okResponse(LONG_DESCRIPTION, "text/plain");
+      }
+      if (url === jobUrl) {
+        return okResponse(`<main>${LONG_DESCRIPTION}</main>`);
+      }
+      if (url === OPENROUTER_URL) {
+        modelCalls += 1;
+        if (modelCalls === 1) {
+          return openRouterResponse({
+            companyName: "",
+            positionTitle: "Frontend Developer",
+            jobDescription: LONG_DESCRIPTION,
+            warnings: [],
+          });
+        }
+        return openRouterResponse({
+          companyName: "Example Labs",
+          positionTitle: "",
+          jobDescription: LONG_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("jina");
+    expect(result.companyName).toBe("");
+    expect(result.positionTitle).toBe("Frontend Developer");
+    expect(result.warnings).toContain("Company name was not found.");
+    expect(result.warnings).toContain("direct attempt returned an incomplete extraction: missing position title.");
+    expect(result.warnings.some((warning) => warning.startsWith("jina attempt returned an incomplete extraction"))).toBe(false);
+  });
+
+  it("prefers the partial candidate with more present identity fields", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
+    const jobUrl = "https://example.com/jobs/ranked-partials";
+    let modelCalls = 0;
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === `https://r.jina.ai/${jobUrl}`) {
+        return okResponse(LONG_DESCRIPTION, "text/plain");
+      }
+      if (url === jobUrl) {
+        return okResponse(`<main>${LONG_DESCRIPTION}</main>`);
+      }
+      if (url === OPENROUTER_URL) {
+        modelCalls += 1;
+        if (modelCalls === 1) {
+          return openRouterResponse({
+            companyName: "",
+            positionTitle: "",
+            jobDescription: LONG_DESCRIPTION,
+            warnings: [],
+          });
+        }
+        return openRouterResponse({
+          companyName: "Example Labs",
+          positionTitle: "",
+          jobDescription: LONG_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("direct");
+    expect(result.companyName).toBe("Example Labs");
+    expect(result.positionTitle).toBe("");
+    expect(result.warnings).toContain("Position title was not found.");
+    expect(result.warnings).toContain("jina attempt returned an incomplete extraction: missing company name, position title.");
+  });
+
+  it("continues to generic sources when a native adapter result is incomplete", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === HH_URL) {
+        return okResponse(`
+          <html>
+            <body>
+              <h1 data-qa="vacancy-title">Senior Fullstack Developer (Node.js + React)</h1>
+              <div data-qa="vacancy-description">
+                <p><strong>LogicLike — цифровая платформа для развития логики и мышления</strong> у детей и взрослых.</p>
+                <p>Мы создаем образовательные продукты, которые помогают миллионам пользователей учиться через практику.</p>
+                <p>Сейчас мы ищем Senior Fullstack Developer, который будет развивать продуктовую платформу на Node.js и React.</p>
+                <ul>
+                  <li>Проектировать и развивать backend-сервисы на Node.js.</li>
+                  <li>Разрабатывать пользовательские интерфейсы на React и TypeScript.</li>
+                  <li>Участвовать в архитектурных решениях, ревью кода и улучшении инженерных процессов.</li>
+                </ul>
+              </div>
+            </body>
+          </html>
+        `);
+      }
+      if (url === `https://r.jina.ai/${HH_URL}`) {
+        return okResponse(`
+          Title: Senior Backend Engineer
+          URL Source: ${HH_URL}
+          Markdown Content:
+          # Senior Backend Engineer
+          Пример Лабс
+          ${LONG_DESCRIPTION}
+        `, "text/plain; charset=utf-8");
+      }
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
+          companyName: "Пример Лабс",
+          positionTitle: "Senior Backend Engineer",
+          salary: "",
+          location: "Удалённо",
+          jobDescription: LONG_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(HH_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("jina");
+    expect(result.companyName).toBe("Пример Лабс");
+    expect(result.positionTitle).toBe("Senior Backend Engineer");
+    expect(result.warnings).toContain("hh attempt returned an incomplete extraction: missing company name.");
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      HH_URL,
+      `https://r.jina.ai/${HH_URL}`,
+      OPENROUTER_URL,
+    ]);
+  });
   it("returns an error result for invalid URLs", async () => {
     const result = await parseJob("not a url");
 

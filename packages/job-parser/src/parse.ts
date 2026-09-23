@@ -7,6 +7,7 @@ import { fetchJinaText } from "./sources/jina.js";
 import { fetchLinkedInJob } from "./sources/linkedin.js";
 import { fetchTeamtailorJob } from "./sources/teamtailor.js";
 import { fetchAshbyJob } from "./sources/ashby.js";
+import { fetchTelegramJob } from "./sources/telegram.js";
 import {
   JobParserError,
   type JobParseResult,
@@ -161,6 +162,13 @@ function buildAttempts(url: string): ParseAttempt[] {
     });
   }
 
+  if (specificSource === "telegram") {
+    attempts.push({
+      source: "telegram",
+      run: () => fetchTelegramJob(url),
+    });
+  }
+
   attempts.push({
     source: "jina",
     run: async () => extractJobFieldsWithOpenRouter(await fetchJinaText(url)),
@@ -229,7 +237,9 @@ export async function parseJob(url: string): Promise<JobParseResult> {
       }
 
       const missingFields = missingCoreFields(fields);
-      if (missingFields.length === 0) {
+      // A Telegram embed is the post itself. Later generic fetches only see the
+      // public page shell, so a real message should not be replaced by that shell.
+      if (missingFields.length === 0 || attempt.source === "telegram") {
         return buildSuccessResult(normalizedUrl, attempt.source, fields, [
           ...fields.warnings,
           ...validation.warnings,

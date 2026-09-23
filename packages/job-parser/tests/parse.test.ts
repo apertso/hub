@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initializeJobParser, isJobParseSource, JOB_PARSE_SOURCES, parseJob } from "../src/index.js";
 import { resetJobParserForTests } from "../src/parse.js";
-import { detectSpecificSource, isAshbyUrl, isHhUrl, isLeverUrl, isTeamtailorUrl } from "../src/utils/url.js";
+import { detectSpecificSource, isAshbyUrl, isHhUrl, isLeverUrl, isTeamtailorUrl, parseTelegramMessageTarget } from "../src/utils/url.js";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const LINKEDIN_URL = "https://www.linkedin.com/jobs/view/4402429247/";
@@ -263,12 +263,14 @@ describe("parseJob", () => {
       "lever",
       "teamtailor",
       "ashby",
+      "telegram",
       "jina",
       "direct",
     ]);
     expect(isJobParseSource("lever")).toBe(true);
     expect(isJobParseSource("teamtailor")).toBe(true);
     expect(isJobParseSource("ashby")).toBe(true);
+    expect(isJobParseSource("telegram")).toBe(true);
     expect(isJobParseSource("manual")).toBe(false);
     expect(isJobParseSource(null)).toBe(false);
   });
@@ -1686,6 +1688,66 @@ describe("parseJob", () => {
       OPENROUTER_URL,
     ]);
   });
+  it("reads a Telegram thread link from the message embed instead of the page shell", async () => {
+    const url = "https://t.me/cyprusithr/46685/112345";
+    const message = [
+      "#vacancy",
+      "",
+      "<b>Looking for:</b>Full Stack Engineer (Python/TypeScript)",
+      "<b>Tech stack:</b> Python, TypeScript, Cloud, DevOps",
+      "<b>Level:</b> Senior",
+      "<b>English level:</b> Fluent",
+      "<b>Workload:</b> Full time",
+      "",
+      "<b>Description:</b> The role involves building and operating a production-grade B2B SaaS platform, with a Python backend and TypeScript frontend. Responsibilities include owning cloud infrastructure and DevOps processes.",
+    ].join("<br/>");
+    const fetchMock = vi.fn(async (input: unknown) => {
+      expect(String(input)).toBe("https://t.me/cyprusithr/112345?embed=1");
+      return okResponse(`<div class="tgme_widget_message_text js-message_text" dir="auto">${message}</div>`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(parseTelegramMessageTarget(url)).toEqual({ username: "cyprusithr", messageId: "112345" });
+    expect(detectSpecificSource(url)).toBe("telegram");
+
+    const result = await parseJob(url);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("telegram");
+    expect(result.url).toBe(url);
+    expect(result.companyName).toBe("");
+    expect(result.positionTitle).toBe("Full Stack Engineer (Python/TypeScript)");
+    expect(result.jobDescription).toContain("production-grade B2B SaaS platform");
+    expect(result.jobDescription).not.toContain("Download");
+    expect(result.warnings).toContain("Company name was not found.");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a labeled company from a Telegram preview URL", async () => {
+    const url = "https://t.me/s/cyprusithr/112345?embed=1";
+    const message = [
+      "#vacancy",
+      "<b>Company:</b> Northwind",
+      "<b>Looking for:</b> Backend Engineer",
+      "<b>Location:</b> Limassol / Remote",
+      "<b>Salary:</b> €70,000-€90,000",
+      "<b>Description:</b> Build and operate customer-facing services with Python, PostgreSQL, and AWS. You will own production incidents, reviews, and deployment.",
+    ].join("<br/>");
+    vi.stubGlobal("fetch", vi.fn(async () => okResponse(
+      `<div class="tgme_widget_message_text">${message}</div>`,
+    )));
+
+    const result = await parseJob(url);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("telegram");
+    expect(result.companyName).toBe("Northwind");
+    expect(result.positionTitle).toBe("Backend Engineer");
+    expect(result.location).toBe("Limassol / Remote");
+    expect(result.salary).toBe("€70,000-€90,000");
+    expect(result.warnings).not.toContain("Company name was not found.");
+  });
+
   it("returns an error result for invalid URLs", async () => {
     const result = await parseJob("not a url");
 

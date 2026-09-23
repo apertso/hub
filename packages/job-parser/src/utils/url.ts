@@ -232,6 +232,60 @@ export function parseGreenhouseJobTarget(url: string): GreenhouseJobTarget | nul
   return null;
 }
 
+const TELEGRAM_HOSTS = new Set(["t.me", "telegram.me", "telegram.dog"]);
+const TELEGRAM_RESERVED_PATHS = new Set([
+  "addstickers",
+  "boost",
+  "c",
+  "iv",
+  "joinchat",
+  "login",
+  "proxy",
+  "share",
+  "socks",
+]);
+
+export type TelegramMessageTarget = {
+  username: string;
+  messageId: string;
+};
+
+export function parseTelegramMessageTarget(url: string): TelegramMessageTarget | null {
+  try {
+    const parsed = new URL(url.trim());
+    const hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    if (!TELEGRAM_HOSTS.has(hostname)) {
+      return null;
+    }
+
+    let parts = parsed.pathname.split("/").filter(Boolean);
+    if (parts[0]?.toLowerCase() === "s") {
+      parts = parts.slice(1);
+    }
+
+    const username = parts[0]?.trim() ?? "";
+    if (!/^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(username) || TELEGRAM_RESERVED_PATHS.has(username.toLowerCase())) {
+      return null;
+    }
+
+    const commentId = parsed.searchParams.get("comment")?.trim() ?? "";
+    const messageId = /^\d+$/.test(commentId)
+      ? commentId
+      : [...parts.slice(1)].reverse().find((part) => /^\d+$/.test(part));
+    if (!messageId) {
+      return null;
+    }
+
+    return { username, messageId };
+  } catch {
+    return null;
+  }
+}
+
+export function telegramEmbedUrl(target: TelegramMessageTarget): string {
+  return `https://t.me/${target.username}/${target.messageId}?embed=1`;
+}
+
 export function detectSpecificSource(url: string): Exclude<JobParseSource, "jina" | "direct"> | null {
   if (isLinkedInUrl(url)) {
     return "linkedin";
@@ -255,6 +309,10 @@ export function detectSpecificSource(url: string): Exclude<JobParseSource, "jina
 
   if (parseAshbyJobTarget(url)) {
     return "ashby";
+  }
+
+  if (parseTelegramMessageTarget(url)) {
+    return "telegram";
   }
 
   return null;

@@ -1,0 +1,36 @@
+Title: Get a Fullstack Developer (JS/Node.js) Job: Wisebits Vacancies
+
+URL Source: https://wisebits.com/vacancies/162-fullstack-developer-jsnodejs
+
+Markdown Content:
+**Wisebits — is an international IT holding with a strong technical team!**
+
+Our key product is a high-load video hosting platform used by millions of people worldwide every day. With over 15 years on the market, we’ve built a professional team that values engagement and initiative.
+
+If you’re excited about working with a high-load product and want to have an impact on its development, join us!
+
+**Who we're looking for:****Fullstack Developer (JS/Node.js).**
+
+**What we expect from you:**
+
+*   5+ years of professional experience developing large-scale projects.
+*   Knowledge of Node.js 18+ and understanding of how asynchronous programming and multithreading work in Node.js.
+*   Strong knowledge of SvelteKit, including Vite, TypeScript, and PostCSS.
+*   Experience working with MongoDB, Cursor Tailing, and transactions.
+*   Basic experience with Docker, Kubernetes, and command-line tools such as sh, bash, zsh, etc.
+*   Familiarity with client-side pub/sub and WebSockets, either natively or using tools such as uWebSockets, SockJS, Faye, etc.
+
+**Nice to have:**
+
+*   Experience with PHP.
+
+**What we offer:**
+
+*   No bureaucracy — flexible working conditions.
+*   An extended benefits package, including medical insurance, tax coverage, foreign language courses, professional training, and all necessary work equipment.
+*   Relocation support: we cover relocation expenses for you and your family, including tickets, visa support, and the first month of accommodation.
+*   A friendly international team that values professionalism and collaboration.
+
+**Work format:**Remote.
+
+**Salary:**From €4,000 net per month. The final compensation level may be higher and depends on relevant experience, skills, and overall match with the role requirements.

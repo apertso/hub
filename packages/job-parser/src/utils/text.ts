@@ -260,14 +260,8 @@ function sliceRelevantWindow(lines: string[]): string[] {
     index > Math.max(0, startIndex) && isStopLine(line),
   );
 
-  if (startIndex === -1 && stopIndex === -1) {
-    return lines;
-  }
-
-  const from = startIndex >= 0 ? Math.max(0, startIndex - 2) : 0;
-  const to = stopIndex >= 0 && stopIndex > from ? stopIndex : lines.length;
-  const header = lines.slice(0, Math.min(5, from));
-  return dedupeLines([...header, ...lines.slice(from, to)]);
+  // Section words in prose cannot identify the start of a vacancy.
+  return stopIndex >= 0 ? lines.slice(0, stopIndex) : lines;
 }
 
 function postProcessLines(lines: string[]): string[] {
@@ -295,15 +289,7 @@ function windowedTextFromSingleLine(value: string): string {
     return "";
   }
 
-  const lower = canonicalizeForMatching(normalized);
-  const startCandidates = START_CUES
-    .map((cue) => lower.indexOf(cue))
-    .filter((index) => index >= 0)
-    .sort((a, b) => a - b);
-  const start = startCandidates[0] ?? 0;
-  const from = start > 0 ? Math.max(0, start - 200) : 0;
-
-  let sliced = normalized.slice(from);
+  let sliced = normalized;
   const slicedLower = canonicalizeForMatching(sliced);
   const stopCandidates = STOP_CUES
     .map((cue) => cueIndex(slicedLower, cue))

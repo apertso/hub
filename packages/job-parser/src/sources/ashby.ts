@@ -1,3 +1,4 @@
+import { requestSignal } from "../utils/abort.js";
 import { JobParserError, type ParsedJobFields } from "../types.js";
 import {
   extractCompanyFromText,
@@ -24,13 +25,6 @@ const ASHBY_GRAPHQL_QUERY = `query ApiJobPosting($organizationHostedJobsPageName
     descriptionHtml
   }
 }`;
-
-function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
-  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-    return AbortSignal.timeout(timeoutMs);
-  }
-  return undefined;
-}
 
 function readString(record: Record<string, unknown>, key: string): string {
   const value = record[key];
@@ -77,14 +71,14 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-async function fetchAshbyGraphqlJob(boardToken: string, jobId: string): Promise<Record<string, unknown> | null> {
+async function fetchAshbyGraphqlJob(boardToken: string, jobId: string, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
   const response = await fetch(ASHBY_GRAPHQL_URL, {
     method: "POST",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
     },
-    signal: timeoutSignal(FETCH_TIMEOUT_MS),
+    signal: requestSignal(FETCH_TIMEOUT_MS, signal),
     body: JSON.stringify({
       operationName: "ApiJobPosting",
       variables: {
@@ -104,14 +98,14 @@ async function fetchAshbyGraphqlJob(boardToken: string, jobId: string): Promise<
   return asRecord(data?.jobPosting);
 }
 
-async function fetchAshbyBoardJob(boardToken: string, jobId: string): Promise<Record<string, unknown> | null> {
+async function fetchAshbyBoardJob(boardToken: string, jobId: string, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
   const response = await fetch(
     `https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(boardToken)}`,
     {
       headers: {
         Accept: "application/json",
       },
-      signal: timeoutSignal(FETCH_TIMEOUT_MS),
+      signal: requestSignal(FETCH_TIMEOUT_MS, signal),
     },
   );
 
@@ -135,7 +129,7 @@ async function fetchAshbyBoardJob(boardToken: string, jobId: string): Promise<Re
   return null;
 }
 
-export async function fetchAshbyJob(url: string): Promise<ParsedJobFields> {
+export async function fetchAshbyJob(url: string, signal?: AbortSignal): Promise<ParsedJobFields> {
   const target = parseAshbyJobTarget(url);
   if (!target) {
     throw new JobParserError("ASHBY_TARGET_NOT_FOUND", "Ashby board token or job id was not found.");
@@ -144,12 +138,12 @@ export async function fetchAshbyJob(url: string): Promise<ParsedJobFields> {
   let graphqlPosting: Record<string, unknown> | null = null;
   let boardPosting: Record<string, unknown> | null = null;
   try {
-    graphqlPosting = await fetchAshbyGraphqlJob(target.boardToken, target.jobId);
+    graphqlPosting = await fetchAshbyGraphqlJob(target.boardToken, target.jobId, signal);
   } catch {
     graphqlPosting = null;
   }
   try {
-    boardPosting = await fetchAshbyBoardJob(target.boardToken, target.jobId);
+    boardPosting = await fetchAshbyBoardJob(target.boardToken, target.jobId, signal);
   } catch {
     boardPosting = null;
   }

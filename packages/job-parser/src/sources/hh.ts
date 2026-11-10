@@ -1,3 +1,4 @@
+import { requestSignal } from "../utils/abort.js";
 import * as cheerio from "cheerio";
 import { JobParserError, type ParsedJobFields } from "../types.js";
 import { decodeHtmlEntities, isVacancyTextTooShort, normalizeWhitespace } from "../utils/text.js";
@@ -10,13 +11,6 @@ const FETCH_HEADERS: Record<string, string> = {
   Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
   "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
 };
-
-function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
-  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-    return AbortSignal.timeout(timeoutMs);
-  }
-  return undefined;
-}
 
 function htmlFragmentToText(html: string): string {
   const text = decodeHtmlEntities(html)
@@ -60,10 +54,10 @@ function readDescription($: cheerio.CheerioAPI): string {
   return htmlFragmentToText(description.html() ?? description.text());
 }
 
-export async function fetchHhJob(url: string): Promise<ParsedJobFields> {
+export async function fetchHhJob(url: string, signal?: AbortSignal): Promise<ParsedJobFields> {
   const response = await fetch(url, {
     headers: FETCH_HEADERS,
-    signal: timeoutSignal(FETCH_TIMEOUT_MS),
+    signal: requestSignal(FETCH_TIMEOUT_MS, signal),
   });
 
   if (!response.ok) {

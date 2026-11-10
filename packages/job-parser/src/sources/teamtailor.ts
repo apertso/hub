@@ -1,3 +1,4 @@
+import { requestSignal } from "../utils/abort.js";
 import * as cheerio from "cheerio";
 import { JobParserError, type ParsedJobFields } from "../types.js";
 import {
@@ -20,13 +21,6 @@ const FETCH_HEADERS: Record<string, string> = {
   Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
   "Accept-Language": "en-US,en;q=0.9",
 };
-
-function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
-  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-    return AbortSignal.timeout(timeoutMs);
-  }
-  return undefined;
-}
 
 function htmlFragmentToText(html: string): string {
   let decoded = decodeHtmlEntities(html);
@@ -264,14 +258,14 @@ function companyFromHostname(url: string): string {
   }
 }
 
-export async function fetchTeamtailorJob(url: string): Promise<ParsedJobFields> {
+export async function fetchTeamtailorJob(url: string, signal?: AbortSignal): Promise<ParsedJobFields> {
   if (!isTeamtailorUrl(url)) {
     throw new JobParserError("TEAMTAILOR_TARGET_NOT_FOUND", "Teamtailor job URL was not recognized.");
   }
 
   const response = await fetch(url, {
     headers: FETCH_HEADERS,
-    signal: timeoutSignal(FETCH_TIMEOUT_MS),
+    signal: requestSignal(FETCH_TIMEOUT_MS, signal),
   });
 
   if (!response.ok) {

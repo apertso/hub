@@ -1,3 +1,4 @@
+import { requestSignal } from "../utils/abort.js";
 import { JobParserError, type ParsedJobFields } from "../types.js";
 import {
   extractCompanyFromText,
@@ -11,13 +12,6 @@ import {
 import { parseLeverJobTarget } from "../utils/url.js";
 
 const FETCH_TIMEOUT_MS = 15_000;
-
-function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
-  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-    return AbortSignal.timeout(timeoutMs);
-  }
-  return undefined;
-}
 
 function readString(record: Record<string, unknown>, key: string): string {
   const value = record[key];
@@ -135,7 +129,7 @@ function buildLeverDescription(payload: Record<string, unknown>): string {
   return normalizeWhitespace(sections.join("\n\n"));
 }
 
-export async function fetchLeverJob(url: string): Promise<ParsedJobFields> {
+export async function fetchLeverJob(url: string, signal?: AbortSignal): Promise<ParsedJobFields> {
   const target = parseLeverJobTarget(url);
   if (!target) {
     throw new JobParserError("LEVER_TARGET_NOT_FOUND", "Lever site slug or posting id was not found.");
@@ -146,7 +140,7 @@ export async function fetchLeverJob(url: string): Promise<ParsedJobFields> {
     headers: {
       Accept: "application/json",
     },
-    signal: timeoutSignal(FETCH_TIMEOUT_MS),
+    signal: requestSignal(FETCH_TIMEOUT_MS, signal),
   });
 
   if (!response.ok) {

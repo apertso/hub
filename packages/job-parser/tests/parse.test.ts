@@ -1465,6 +1465,128 @@ describe("parseJob", () => {
     ]);
   });
 
+  it.each([
+    {
+      site: "example.com",
+      jinaBody: "Title: Challenge\nWarning: Target URL returned error 403: Forbidden\n\nMarkdown Content:\n" + LONG_DESCRIPTION,
+      direct: () => new Response("", { status: 403 }),
+    },
+    {
+      site: "example.org",
+      jinaBody: "…",
+      direct: () => okResponse('<div id="app"></div>'),
+    },
+  ])("renders in a browser when generic fetches cannot read $site", async ({ site, jinaBody, direct }) => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
+    const jobUrl = `https://${site}/jobs/role`;
+    const jinaUrl = `https://r.jina.ai/${jobUrl}`;
+    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      if (url === jinaUrl) {
+        const headers = new Headers(init?.headers);
+        if (!headers.has("X-Engine")) {
+          return okResponse(jinaBody, "text/plain");
+        }
+        expect(headers.get("X-Engine")).toBe("browser");
+        expect(headers.get("X-No-Cache")).toBe("true");
+        expect(headers.get("X-Timeout")).toBe("16");
+        expect(headers.get("X-Respond-With")).toBe("markdown");
+        return okResponse(LONG_DESCRIPTION, "text/plain");
+      }
+      if (url === jobUrl) {
+        return direct();
+      }
+      return openRouterResponse({
+        companyName: "Example Labs",
+        positionTitle: "Frontend Developer",
+        jobDescription: LONG_DESCRIPTION,
+        warnings: [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result).toMatchObject({
+      ok: true, source: "jina", companyName: "Example Labs",
+      positionTitle: "Frontend Developer", jobDescription: LONG_DESCRIPTION,
+    });
+    expect(result.warnings).toContain("Jina rendered the vacancy in a browser.");
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([jinaUrl, jobUrl, jinaUrl, OPENROUTER_URL]);
+  });
+
+  it("does not send a browser challenge to the model even when Reader returns HTTP 200", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
+    const jobUrl = "https://example.org/jobs/blocked";
+    const jinaUrl = `https://r.jina.ai/${jobUrl}`;
+    const fetchMock = vi.fn(async (input: unknown) => String(input) === jinaUrl
+      ? okResponse("Warning: Target URL returned error 403: Forbidden\n\nMarkdown Content:\n" + LONG_DESCRIPTION, "text/plain")
+      : new Response("", { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(false);
+    expect(result.warnings).toContain("jina browser attempt failed: Jina target returned HTTP 403.");
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([jinaUrl, jobUrl, jinaUrl]);
+  });
+
+  it.each([404, 410, 429])("skips browser rendering when the target returns HTTP %s", async (status) => {
+    const jobUrl = "https://example.org/jobs/unavailable";
+    const jinaUrl = `https://r.jina.ai/${jobUrl}`;
+    const fetchMock = vi.fn(async (input: unknown) => String(input) === jinaUrl
+      ? okResponse("…", "text/plain")
+      : new Response("", { status }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.errorCode).toBe("DIRECT_HTTP_ERROR");
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([jinaUrl, jobUrl]);
+  });
+
+  it("keeps the best partial result when the deadline expires during browser rendering", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
+    const jobUrl = "https://example.org/jobs/partial";
+    const jinaUrl = `https://r.jina.ai/${jobUrl}`;
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+      if (String(input) === jinaUrl) {
+        if (new Headers(init?.headers).get("X-Engine") === "browser") {
+          controller.abort(new DOMException("Expired", "TimeoutError"));
+          expect(init?.signal?.aborted).toBe(true);
+          init?.signal?.throwIfAborted();
+        }
+        return okResponse(LONG_DESCRIPTION, "text/plain");
+      }
+      if (String(input) === jobUrl) {
+        return new Response("", { status: 403 });
+      }
+      return openRouterResponse({ companyName: "", positionTitle: "Frontend Developer", jobDescription: LONG_DESCRIPTION });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(jobUrl, { signal: controller.signal });
+
+    expect(result).toMatchObject({
+      ok: true, source: "jina", companyName: "",
+      positionTitle: "Frontend Developer", jobDescription: LONG_DESCRIPTION,
+    });
+    expect(result.warnings).toContain("Job parsing reached its time limit.");
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([jinaUrl, OPENROUTER_URL, jobUrl, jinaUrl]);
+  });
+
+  it("returns a timeout without fetching when the deadline already expired", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const signal = AbortSignal.abort(new DOMException("Expired", "TimeoutError"));
+
+    const result = await parseJob("https://example.org/jobs/role", { signal });
+
+    expect(result).toMatchObject({ ok: false, errorCode: "PARSE_TIMEOUT" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("returns the best partial candidate when a later attempt fails", async () => {
     initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
     const jobUrl = "https://example.com/jobs/partial-company";

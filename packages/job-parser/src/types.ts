@@ -50,10 +50,14 @@ export type JobParserConfig = {
   openRouter?: OpenRouterRequestConfig;
 };
 
+export type JobParseOptions = {
+  signal?: AbortSignal;
+};
+
 export class JobParserError extends Error {
   readonly code: string;
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, readonly httpStatus?: number) {
     super(message);
     this.name = "JobParserError";
     this.code = code;

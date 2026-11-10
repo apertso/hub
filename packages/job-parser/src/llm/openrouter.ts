@@ -1,9 +1,11 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import {
   JobParserError,
   type JobParserConfig,
   type ParsedJobFields,
 } from '../types.js';
 import { sanitizeVacancyText } from '../utils/text.js';
+import { requestSignal } from '../utils/abort.js';
 import { normalizeOpenRouterJobFields } from './normalize.js';
 
 const DEFAULT_MODEL = 'inclusionai/ling-3.0-flash';
@@ -48,12 +50,8 @@ let initializedOpenRouterClient: OpenRouterClient | null = null;
 type OpenRouterJsonRequest = {
   systemPrompt: string;
   userPrompt: string;
-  timeoutMs?: number;
+  signal?: AbortSignal;
 };
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function stringifyError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -118,16 +116,6 @@ function extractJsonObject(text: string): string {
     );
   }
   return trimmed.slice(start, end + 1);
-}
-
-function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
-  if (
-    typeof AbortSignal !== 'undefined' &&
-    typeof AbortSignal.timeout === 'function'
-  ) {
-    return AbortSignal.timeout(timeoutMs);
-  }
-  return undefined;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -199,6 +187,7 @@ async function requestOpenRouterJsonObject<T extends Record<string, unknown>>(
   request: OpenRouterJsonRequest,
 ): Promise<T> {
   for (let attempt = 0; attempt <= DEFAULT_BACKOFF_MS.length; attempt += 1) {
+    request.signal?.throwIfAborted();
     try {
       const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
         method: 'POST',
@@ -206,7 +195,7 @@ async function requestOpenRouterJsonObject<T extends Record<string, unknown>>(
           Authorization: `Bearer ${client.apiKey}`,
           'Content-Type': 'application/json',
         },
-        signal: timeoutSignal(request.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+        signal: requestSignal(DEFAULT_TIMEOUT_MS, request.signal),
         body: JSON.stringify({
           ...client.requestJson,
           response_format: { type: 'json_object' },
@@ -264,7 +253,7 @@ async function requestOpenRouterJsonObject<T extends Record<string, unknown>>(
         }
         throw new JobParserError('OPENROUTER_REQUEST_FAILED', stringifyError(error));
       }
-      await sleep(DEFAULT_BACKOFF_MS[attempt]);
+      await sleep(DEFAULT_BACKOFF_MS[attempt], undefined, { signal: request.signal });
     }
   }
 
@@ -276,10 +265,12 @@ async function requestOpenRouterJsonObject<T extends Record<string, unknown>>(
 
 export async function extractJobFieldsWithOpenRouter(
   rawText: string,
+  signal?: AbortSignal,
 ): Promise<ParsedJobFields> {
   const client = getInitializedOpenRouterClient();
   const truncatedText = rawText.slice(0, TEXT_LIMIT);
   const payload = await requestOpenRouterJsonObject<Record<string, unknown>>(client, {
+    signal,
     systemPrompt:
       'You extract job posting fields. Return only one valid JSON object with no markdown or explanations.',
     userPrompt: [

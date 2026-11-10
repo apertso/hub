@@ -1,3 +1,4 @@
+import { requestSignal } from "../utils/abort.js";
 import * as cheerio from "cheerio";
 
 import { JobParserError, type ParsedJobFields } from "../types.js";
@@ -37,13 +38,6 @@ const COMPANY_LABELS = [
 const SALARY_LABELS = ["salary", "compensation", "зарплата", "оклад", "compensation range"];
 const LOCATION_LABELS = ["location", "job location", "локация", "город", "location / remote"];
 
-function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
-  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-    return AbortSignal.timeout(timeoutMs);
-  }
-  return undefined;
-}
-
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -78,7 +72,7 @@ export function extractTelegramMessageText(html: string): string {
     .trim();
 }
 
-export async function fetchTelegramJob(url: string): Promise<ParsedJobFields> {
+export async function fetchTelegramJob(url: string, signal?: AbortSignal): Promise<ParsedJobFields> {
   const target = parseTelegramMessageTarget(url);
   if (!target) {
     throw new JobParserError("TELEGRAM_URL_INVALID", "Telegram URL does not point at a message.");
@@ -86,7 +80,7 @@ export async function fetchTelegramJob(url: string): Promise<ParsedJobFields> {
 
   const response = await fetch(telegramEmbedUrl(target), {
     headers: FETCH_HEADERS,
-    signal: timeoutSignal(FETCH_TIMEOUT_MS),
+    signal: requestSignal(FETCH_TIMEOUT_MS, signal),
   });
   if (!response.ok) {
     throw new JobParserError("TELEGRAM_HTTP_ERROR", `Telegram returned HTTP ${response.status}.`);

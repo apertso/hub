@@ -1,3 +1,4 @@
+import { requestSignal } from "../utils/abort.js";
 import { JobParserError, type ParsedJobFields } from "../types.js";
 import {
   decodeHtmlEntities,
@@ -13,13 +14,6 @@ import {
 import { parseGreenhouseJobTarget } from "../utils/url.js";
 
 const FETCH_TIMEOUT_MS = 15_000;
-
-function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
-  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-    return AbortSignal.timeout(timeoutMs);
-  }
-  return undefined;
-}
 
 function readString(record: Record<string, unknown>, key: string): string {
   const value = record[key];
@@ -92,7 +86,7 @@ function readSalary(payload: Record<string, unknown>): string {
   return "";
 }
 
-export async function fetchGreenhouseJob(url: string): Promise<ParsedJobFields> {
+export async function fetchGreenhouseJob(url: string, signal?: AbortSignal): Promise<ParsedJobFields> {
   const target = parseGreenhouseJobTarget(url);
   if (!target) {
     throw new JobParserError("GREENHOUSE_TARGET_NOT_FOUND", "Greenhouse board token or job id was not found.");
@@ -103,7 +97,7 @@ export async function fetchGreenhouseJob(url: string): Promise<ParsedJobFields> 
     headers: {
       Accept: "application/json",
     },
-    signal: timeoutSignal(FETCH_TIMEOUT_MS),
+    signal: requestSignal(FETCH_TIMEOUT_MS, signal),
   });
 
   if (!response.ok) {

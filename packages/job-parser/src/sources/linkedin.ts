@@ -1,3 +1,4 @@
+import { requestSignal } from "../utils/abort.js";
 import { JobParserError, type ParsedJobFields } from "../types.js";
 import {
   extractCompanyFromText,
@@ -20,14 +21,7 @@ const FETCH_HEADERS: Record<string, string> = {
   "Accept-Language": "en-US,en;q=0.9",
 };
 
-function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
-  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-    return AbortSignal.timeout(timeoutMs);
-  }
-  return undefined;
-}
-
-export async function fetchLinkedInJob(url: string): Promise<ParsedJobFields> {
+export async function fetchLinkedInJob(url: string, signal?: AbortSignal): Promise<ParsedJobFields> {
   const jobId = extractLinkedInJobId(url);
   if (!jobId) {
     throw new JobParserError("LINKEDIN_JOB_ID_NOT_FOUND", "LinkedIn job id was not found in the URL.");
@@ -36,7 +30,7 @@ export async function fetchLinkedInJob(url: string): Promise<ParsedJobFields> {
   const guestUrl = `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`;
   const response = await fetch(guestUrl, {
     headers: FETCH_HEADERS,
-    signal: timeoutSignal(LINKEDIN_GUEST_TIMEOUT_MS),
+    signal: requestSignal(LINKEDIN_GUEST_TIMEOUT_MS, signal),
   });
 
   if (!response.ok) {

@@ -1,3 +1,4 @@
+import { requestSignal } from "../utils/abort.js";
 import { JobParserError } from "../types.js";
 import {
   extractVacancyTextFromHtml,
@@ -14,21 +15,17 @@ const FETCH_HEADERS: Record<string, string> = {
   "Accept-Language": "en-US,en;q=0.9",
 };
 
-function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
-  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-    return AbortSignal.timeout(timeoutMs);
-  }
-  return undefined;
-}
-
-export async function fetchDirectText(url: string): Promise<string> {
+export async function fetchDirectText(url: string, signal?: AbortSignal): Promise<string> {
   const response = await fetch(url, {
     headers: FETCH_HEADERS,
-    signal: timeoutSignal(FETCH_TIMEOUT_MS),
+    signal: requestSignal(FETCH_TIMEOUT_MS, signal),
   });
 
   if (!response.ok) {
-    throw new JobParserError("DIRECT_HTTP_ERROR", `Direct fetch returned HTTP ${response.status}.`);
+    throw new JobParserError("DIRECT_HTTP_ERROR", `Direct fetch returned HTTP ${response.status}.`, response.status);
+  }
+  if (response.headers.get("cf-mitigated") === "challenge") {
+    throw new JobParserError("DIRECT_SOURCE_BLOCKED", "Direct fetch returned a browser challenge.");
   }
 
   const html = await response.text();

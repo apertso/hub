@@ -1065,6 +1065,62 @@ describe("parseJob", () => {
     expect(result.warnings.some((warning) => warning.includes("jina attempt failed"))).toBe(true);
   });
 
+  it("keeps the vacancy after an employment type label in direct HTML", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
+    const jobUrl = "https://jobs.techtree.dev/job/example?tp=example";
+    const companyName = "Пример Лабс";
+    const positionTitle = "Инженер серверной платформы";
+    const location = "Удалённо";
+    const summary = `${positionTitle} — ${companyName}. ${location}.`;
+    const description = [
+      "Команда разрабатывает платформу обработки данных для распределённых систем. Вы будете проектировать сервисы, которые обрабатывают миллионы событий в день и помогают клиентам отслеживать состояние инфраструктуры.",
+      "Вам предстоит улучшать очереди сообщений, измерять задержку и настраивать мониторинг. Мы ждём опыта разработки на Python, работы с PostgreSQL и сопровождения сервисов в промышленной среде.",
+      "Мы предлагаем гибкий график, бюджет на профессиональное обучение и возможность работать из любой страны Европы. Команда регулярно обсуждает архитектуру и вместе разбирает причины производственных инцидентов.",
+    ];
+    const html = `
+      <title>${positionTitle} — ${companyName} | TechTree</title>
+      <script type="application/ld+json">${JSON.stringify({
+        "@type": "JobPosting",
+        title: positionTitle,
+        hiringOrganization: { name: companyName },
+        description: summary,
+      })}</script>
+      <nav>
+        <div>Все вакансии технологических компаний</div>
+        <div>Обзор открытых позиций и информация о работодателях</div>
+      </nav>
+      <main>
+        <article>
+          <h1>${positionTitle}</h1>
+          <div>${companyName}</div>
+          <div>${location}</div>
+          <div>Employment Type</div>
+          <div>Полная занятость</div>
+          ${description.map((paragraph) => `<p>${paragraph}</p>`).join("\n")}
+        </article>
+      </main>
+    `;
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url === jobUrl) {
+        return okResponse(html);
+      }
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({ companyName, positionTitle, location, jobDescription: summary });
+      }
+      return new Response("", { status: 429 });
+    }));
+
+    const result = await parseJob(jobUrl);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("direct");
+    expect(result.location).toBe(location);
+    for (const paragraph of description) {
+      expect(result.jobDescription).toContain(paragraph);
+    }
+  });
+
   it("merges OpenRouter JSON config into the chat-completions request", async () => {
     initializeJobParser({
       openRouterApiKey: "test-openrouter-key",

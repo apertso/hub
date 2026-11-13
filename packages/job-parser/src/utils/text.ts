@@ -250,7 +250,7 @@ function isNoiseLine(line: string): boolean {
 }
 
 function isStopLine(line: string): boolean {
-  return EXACT_PAGE_CHROME_LINES.has(exactLineKey(line)) || STOP_CUES.some((cue) => cueMatches(line, cue));
+  return STOP_CUES.some((cue) => cueMatches(line, cue));
 }
 
 function sliceRelevantWindow(lines: string[]): string[] {

@@ -153,6 +153,40 @@ export function parseAshbyJobTarget(url: string): AshbyJobTarget | null {
   }
 }
 
+export type HimalayasJobTarget = {
+  companySlug: string;
+  jobSlug: string;
+};
+
+function isHimalayasHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === "himalayas.app" || normalized === "www.himalayas.app";
+}
+
+export function parseHimalayasJobTarget(url: string): HimalayasJobTarget | null {
+  try {
+    const parsed = new URL(url.trim());
+    if (!isHimalayasHost(parsed.hostname)) {
+      return null;
+    }
+
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    if (parts.length < 4 || parts[0]?.toLowerCase() !== "companies" || parts[2]?.toLowerCase() !== "jobs") {
+      return null;
+    }
+
+    const companySlug = decodeURIComponent(parts[1] ?? "").trim();
+    const jobSlug = decodeURIComponent(parts[3] ?? "").trim();
+    if (!companySlug || !jobSlug) {
+      return null;
+    }
+
+    return { companySlug, jobSlug };
+  } catch {
+    return null;
+  }
+}
+
 export function isTeamtailorUrl(url: string): boolean {
   try {
     const parsed = new URL(url.trim());
@@ -309,6 +343,10 @@ export function detectSpecificSource(url: string): Exclude<JobParseSource, "jina
 
   if (parseAshbyJobTarget(url)) {
     return "ashby";
+  }
+
+  if (parseHimalayasJobTarget(url)) {
+    return "himalayas";
   }
 
   if (parseTelegramMessageTarget(url)) {

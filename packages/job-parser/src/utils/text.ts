@@ -772,3 +772,27 @@ function usefulMetadataLines(text: string): string[] {
 function firstUsefulLine(text: string): string {
   return usefulMetadataLines(text)[0] ?? "";
 }
+
+export function htmlFragmentToText(html: string): string {
+  let decoded = decodeHtmlEntities(html);
+  // Job board JSON (e.g. Teamtailor JSON-LD) often double-encodes markup (&lt;p&gt;...).
+  if (/&lt;|&gt;|&amp;|&quot;|&#39;/i.test(decoded)) {
+    decoded = decodeHtmlEntities(decoded);
+  }
+
+  const text = decoded
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<li\b[^>]*>/gi, "\n- ")
+    .replace(/<\/(p|div|li|section|article|main|h1|h2|h3|h4|h5|h6|ul|ol|tr|td|th)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ");
+
+  return text
+    .split(/\r?\n+/g)
+    .map((line) => normalizeWhitespace(line))
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}

@@ -1,7 +1,8 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initializeJobParser, isJobParseSource, JOB_PARSE_SOURCES, parseJob } from "../src/index.js";
 import { resetJobParserForTests } from "../src/parse.js";
-import { detectSpecificSource, isAshbyUrl, isHhUrl, isLeverUrl, isTeamtailorUrl, parseTelegramMessageTarget } from "../src/utils/url.js";
+import { detectSpecificSource, isAshbyUrl, isHhUrl, isLeverUrl, isTeamtailorUrl, parseHimalayasJobTarget, parseTelegramMessageTarget } from "../src/utils/url.js";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const LINKEDIN_URL = "https://www.linkedin.com/jobs/view/4402429247/";
@@ -10,6 +11,11 @@ const GREENHOUSE_URL = "https://job-boards.eu.greenhouse.io/brainrocketltd/jobs/
 const LEVER_URL = "https://jobs.lever.co/binance/8a4660a3-28de-41e6-bcaf-ef404c481338";
 const HH_URL = "https://nn.hh.ru/vacancy/133066281";
 const TEAMTAILOR_URL = "https://interventure.teamtailor.com/jobs/7674883-senior-ai-native-fullstack-engineer-ringier-team";
+const HIMALAYAS_URL = "https://himalayas.app/companies/elvoro/jobs/ai-app-developer-chatgpt-claude-grok-connectors-elvoro-ltd";
+const HIMALAYAS_SEARCH_URL = "https://himalayas.app/jobs/api/search";
+const HIMALAYAS_JOB = JSON.parse(
+  readFileSync(new URL("./fixtures/himalayas-elvoro.json", import.meta.url), "utf8"),
+) as Record<string, unknown>;
 const ASHBY_URL = "https://jobs.ashbyhq.com/improbable/f5e52200-8498-4f73-bbcb-5452a34dfa82";
 
 const LONG_DESCRIPTION = [
@@ -263,6 +269,7 @@ describe("parseJob", () => {
       "lever",
       "teamtailor",
       "ashby",
+      "himalayas",
       "telegram",
       "jina",
       "direct",
@@ -270,6 +277,7 @@ describe("parseJob", () => {
     expect(isJobParseSource("lever")).toBe(true);
     expect(isJobParseSource("teamtailor")).toBe(true);
     expect(isJobParseSource("ashby")).toBe(true);
+    expect(isJobParseSource("himalayas")).toBe(true);
     expect(isJobParseSource("telegram")).toBe(true);
     expect(isJobParseSource("manual")).toBe(false);
     expect(isJobParseSource(null)).toBe(false);
@@ -727,6 +735,129 @@ describe("parseJob", () => {
     expect(result.positionTitle).toBe("Pioneer Talent Program - AI Agent Developer");
     expect(result.warnings.some((warning) => warning.includes("lever attempt failed"))).toBe(true);
     expect(fetchMock).not.toHaveBeenCalledWith(LEVER_URL, expect.anything());
+  });
+
+  it("detects Himalayas company job URLs as the Himalayas source", () => {
+    expect(parseHimalayasJobTarget(HIMALAYAS_URL)).toEqual({
+      companySlug: "elvoro",
+      jobSlug: "ai-app-developer-chatgpt-claude-grok-connectors-elvoro-ltd",
+    });
+    expect(parseHimalayasJobTarget("https://www.himalayas.app/companies/acme/jobs/backend-engineer?utm_source=api")).toEqual({
+      companySlug: "acme",
+      jobSlug: "backend-engineer",
+    });
+    expect(parseHimalayasJobTarget("https://himalayas.app/companies/acme")).toBeNull();
+    expect(parseHimalayasJobTarget("https://himalayas.app/jobs/python")).toBeNull();
+    expect(parseHimalayasJobTarget("https://example.com/companies/acme/jobs/backend-engineer")).toBeNull();
+    expect(detectSpecificSource(HIMALAYAS_URL)).toBe("himalayas");
+  });
+
+  it("extracts Himalayas jobs from the public search API without OpenRouter", async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = new URL(String(input));
+      if (`${url.origin}${url.pathname}` === HIMALAYAS_SEARCH_URL && url.searchParams.get("q")) {
+        return okJson({ jobs: [{ ...HIMALAYAS_JOB, guid: "https://himalayas.app/companies/elvoro/jobs/other-role" }, HIMALAYAS_JOB] });
+      }
+      return new Response("", { status: 403 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(HIMALAYAS_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("himalayas");
+    expect(result.companyName).toBe("Elvoro");
+    expect(result.positionTitle).toBe("AI App Developer (ChatGPT, Claude & Grok Connectors) – Elvoro Ltd");
+    expect(result.location).toBe("Remote");
+    expect(result.jobDescription).toContain("Elvoro is a founder-led AI social media marketing and advertising company.");
+    expect(result.jobDescription).not.toMatch(/<[a-z]|&amp;/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requested = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(requested.searchParams.get("company")).toBe("elvoro");
+    expect(requested.searchParams.get("q")).toBe("ai app developer chatgpt claude grok connectors elvoro ltd");
+  });
+
+  it("finds Himalayas jobs by URL in company pages when the keyword search misses, in any language", async () => {
+    const url = "https://himalayas.app/companies/beispiel-gmbh/jobs/softwareentwickler-in-m-w-d";
+    const description = [
+      "<h3>Über uns</h3>",
+      "<p>Die Beispiel GmbH entwickelt zuverlässige Software für Logistikunternehmen in ganz Europa.</p>",
+      "<h3>Deine Aufgaben</h3>",
+      "<ul><li>Du entwickelst Backend-Dienste mit TypeScript und Node.js.</li>",
+      "<li>Du arbeitest eng mit Produkt- und Designteams zusammen.</li></ul>",
+      "<p>Wir bieten flexible Arbeitszeiten, Weiterbildungsbudget und ein freundliches Team.</p>",
+    ].join("");
+    const job = {
+      title: "Softwareentwickler:in (m/w/d)",
+      companyName: "Beispiel GmbH",
+      companySlug: "beispiel-gmbh",
+      minSalary: 60000,
+      maxSalary: 75000,
+      currency: "EUR",
+      salaryPeriod: "annual",
+      locationRestrictions: ["Germany", "Austria"],
+      description,
+      guid: url,
+    };
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const requested = new URL(String(input));
+      if (requested.searchParams.get("q")) {
+        return okJson({ jobs: [] });
+      }
+      if (requested.searchParams.get("page") === "1") {
+        return okJson({ jobs: [{ ...job, guid: "https://himalayas.app/companies/beispiel-gmbh/jobs/andere-stelle" }] });
+      }
+      if (requested.searchParams.get("page") === "2") {
+        return okJson({ jobs: [job] });
+      }
+      return okJson({ jobs: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(url);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("himalayas");
+    expect(result.companyName).toBe("Beispiel GmbH");
+    expect(result.positionTitle).toBe("Softwareentwickler:in (m/w/d)");
+    expect(result.salary).toBe("EUR 60,000 - 75,000 / annual");
+    expect(result.location).toBe("Remote (Germany, Austria)");
+    expect(result.jobDescription).toContain("- Du entwickelst Backend-Dienste mit TypeScript und Node.js.");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("falls back from Himalayas to Jina when the job is missing from the API", async () => {
+    initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.startsWith(HIMALAYAS_SEARCH_URL)) {
+        return okJson({ jobs: [] });
+      }
+      if (url === `https://r.jina.ai/${HIMALAYAS_URL}`) {
+        return okResponse(`Title: AI App Developer
+URL Source: ${HIMALAYAS_URL}
+Markdown Content:
+# AI App Developer
+Elvoro
+${LONG_DESCRIPTION}`, "text/plain; charset=utf-8");
+      }
+      if (url === OPENROUTER_URL) {
+        return openRouterResponse({
+          companyName: "Elvoro",
+          positionTitle: "AI App Developer",
+          jobDescription: LONG_DESCRIPTION,
+          warnings: [],
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(HIMALAYAS_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("jina");
+    expect(result.warnings.some((warning) => warning.includes("himalayas attempt failed"))).toBe(true);
   });
 
   it("detects teamtailor.com job URLs as the Teamtailor source", () => {

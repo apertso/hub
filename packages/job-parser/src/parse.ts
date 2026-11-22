@@ -7,6 +7,7 @@ import { fetchJinaText } from "./sources/jina.js";
 import { fetchLinkedInJob } from "./sources/linkedin.js";
 import { fetchTeamtailorJob } from "./sources/teamtailor.js";
 import { fetchAshbyJob } from "./sources/ashby.js";
+import { fetchHimalayasJob } from "./sources/himalayas.js";
 import { fetchTelegramJob } from "./sources/telegram.js";
 import {
   JobParserError,
@@ -163,6 +164,13 @@ function buildAttempts(url: string, signal?: AbortSignal): ParseAttempt[] {
     attempts.push({
       source: "ashby",
       run: () => fetchAshbyJob(url, signal),
+    });
+  }
+
+  if (specificSource === "himalayas") {
+    attempts.push({
+      source: "himalayas",
+      run: () => fetchHimalayasJob(url, signal),
     });
   }
 

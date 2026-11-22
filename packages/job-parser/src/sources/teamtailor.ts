@@ -2,7 +2,7 @@ import { requestSignal } from "../utils/abort.js";
 import * as cheerio from "cheerio";
 import { JobParserError, type ParsedJobFields } from "../types.js";
 import {
-  decodeHtmlEntities,
+  htmlFragmentToText,
   extractCompanyFromText,
   extractCompanyRoleFromHtml,
   extractLocationFromText,
@@ -21,30 +21,6 @@ const FETCH_HEADERS: Record<string, string> = {
   Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
   "Accept-Language": "en-US,en;q=0.9",
 };
-
-function htmlFragmentToText(html: string): string {
-  let decoded = decodeHtmlEntities(html);
-  // Teamtailor JSON-LD often double-encodes markup (&lt;p&gt;...).
-  if (/&lt;|&gt;|&amp;|&quot;|&#39;/i.test(decoded)) {
-    decoded = decodeHtmlEntities(decoded);
-  }
-
-  const text = decoded
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
-    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, " ")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<li\b[^>]*>/gi, "\n- ")
-    .replace(/<\/(p|div|li|section|article|main|h1|h2|h3|h4|h5|h6|ul|ol|tr|td|th)>/gi, "\n")
-    .replace(/<[^>]+>/g, " ");
-
-  return text
-    .split(/\r?\n+/g)
-    .map((line) => normalizeWhitespace(line))
-    .filter(Boolean)
-    .join("\n")
-    .trim();
-}
 
 function collectJobPostingNodes(value: unknown, target: Record<string, unknown>[]): void {
   if (!value || typeof value !== "object") {

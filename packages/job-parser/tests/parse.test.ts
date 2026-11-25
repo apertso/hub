@@ -328,6 +328,54 @@ describe("parseJob", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("retries the LinkedIn guest endpoint after a rate limit instead of falling back", async () => {
+    const linkedinGuestHtml = `
+      <html>
+        <body>
+          <h2 class="top-card-layout__title topcard__title">Frontend Developer</h2>
+          <a class="topcard__org-name-link">Synthesia</a>
+          <div class="show-more-less-html__markup">${LONG_DESCRIPTION.split("\n").map((line) => `<p>${line}</p>`).join("")}</div>
+        </body>
+      </html>
+    `;
+    let guestCalls = 0;
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input) === "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/4402429247") {
+        guestCalls += 1;
+        return guestCalls < 3 ? new Response("", { status: 429 }) : okResponse(linkedinGuestHtml);
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(LINKEDIN_URL);
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toBe("linkedin");
+    expect(result.companyName).toBe("Synthesia");
+    expect(result.positionTitle).toBe("Frontend Developer");
+    expect(result.warnings).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops retrying LinkedIn after a bounded number of rate limits", async () => {
+    let guestCalls = 0;
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input).startsWith("https://www.linkedin.com/jobs-guest/")) {
+        guestCalls += 1;
+        return new Response("", { status: 429 });
+      }
+      return new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseJob(LINKEDIN_URL);
+
+    expect(result.ok).toBe(false);
+    expect(guestCalls).toBe(4);
+    expect(result.warnings).toContain("linkedin attempt failed: LinkedIn guest endpoint returned HTTP 429 after 4 attempt(s).");
+  });
+
   it("does not truncate LinkedIn descriptions when prose mentions languages", async () => {
     const linkedinGuestHtml = `
       <html>

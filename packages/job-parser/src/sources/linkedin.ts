@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { requestSignal } from "../utils/abort.js";
 import { JobParserError, type ParsedJobFields } from "../types.js";
 import {
@@ -13,6 +14,10 @@ import {
 import { extractLinkedInJobId } from "../utils/url.js";
 
 const LINKEDIN_GUEST_TIMEOUT_MS = 12_000;
+// The guest endpoint rate-limits datacenter IPs per request rather than per
+// burst: a 429 is usually followed by a 200. Later sources only see LinkedIn's
+// public page shell, which lacks the title and description, so retry here.
+const LINKEDIN_RETRY_BACKOFF_MS = [300, 800, 1_500];
 
 const FETCH_HEADERS: Record<string, string> = {
   "User-Agent":
@@ -28,14 +33,7 @@ export async function fetchLinkedInJob(url: string, signal?: AbortSignal): Promi
   }
 
   const guestUrl = `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`;
-  const response = await fetch(guestUrl, {
-    headers: FETCH_HEADERS,
-    signal: requestSignal(LINKEDIN_GUEST_TIMEOUT_MS, signal),
-  });
-
-  if (!response.ok) {
-    throw new JobParserError("LINKEDIN_HTTP_ERROR", `LinkedIn guest endpoint returned HTTP ${response.status}.`);
-  }
+  const response = await fetchGuestPosting(guestUrl, signal);
 
   const html = await response.text();
   const metadata = extractCompanyRoleFromHtml(html);
@@ -52,4 +50,30 @@ export async function fetchLinkedInJob(url: string, signal?: AbortSignal): Promi
     jobDescription: text,
     warnings: [],
   };
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+async function fetchGuestPosting(guestUrl: string, signal?: AbortSignal): Promise<Response> {
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetch(guestUrl, {
+      headers: FETCH_HEADERS,
+      signal: requestSignal(LINKEDIN_GUEST_TIMEOUT_MS, signal),
+    });
+    if (response.ok) {
+      return response;
+    }
+    const backoff = LINKEDIN_RETRY_BACKOFF_MS[attempt];
+    if (!isRetryableStatus(response.status) || backoff === undefined) {
+      throw new JobParserError(
+        "LINKEDIN_HTTP_ERROR",
+        `LinkedIn guest endpoint returned HTTP ${response.status} after ${attempt + 1} attempt(s).`,
+        response.status,
+      );
+    }
+    await response.body?.cancel();
+    await sleep(backoff, undefined, { signal });
+  }
 }

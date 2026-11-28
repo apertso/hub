@@ -1,5 +1,6 @@
 import { requestSignal } from "../utils/abort.js";
-import { JobParserError, type ParsedJobFields } from "../types.js";
+import { JobParserError, type ApplicationQuestion, type ParsedJobFields } from "../types.js";
+import { asRecord, buildApplicationQuestions } from "../utils/questions.js";
 import {
   decodeHtmlEntities,
   extractCompanyFromText,
@@ -86,6 +87,23 @@ function readSalary(payload: Record<string, unknown>): string {
   return "";
 }
 
+// Compliance, demographic and applicant-location blocks live under other keys and are skipped.
+function readQuestions(payload: Record<string, unknown>): ApplicationQuestion[] {
+  const questions = payload.questions;
+  if (!Array.isArray(questions)) {
+    return [];
+  }
+  return buildApplicationQuestions(questions.map((item) => {
+    const record = asRecord(item) ?? {};
+    const fields = Array.isArray(record.fields) ? record.fields : [];
+    const options = fields.flatMap((field) => {
+      const values = asRecord(field)?.values;
+      return Array.isArray(values) ? values.map((value) => asRecord(value)?.label) : [];
+    });
+    return { label: record.label, required: record.required, options };
+  }));
+}
+
 export async function fetchGreenhouseJob(url: string, signal?: AbortSignal): Promise<ParsedJobFields> {
   const target = parseGreenhouseJobTarget(url);
   if (!target) {
@@ -93,7 +111,7 @@ export async function fetchGreenhouseJob(url: string, signal?: AbortSignal): Pro
   }
 
   const apiUrl = `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(target.boardToken)}/jobs/${encodeURIComponent(target.jobId)}`;
-  const response = await fetch(apiUrl, {
+  const response = await fetch(`${apiUrl}?questions=true`, {
     headers: {
       Accept: "application/json",
     },
@@ -117,6 +135,7 @@ export async function fetchGreenhouseJob(url: string, signal?: AbortSignal): Pro
     salary: readSalary(payload) || extractSalaryFromText(text),
     location: readLocation(payload) || extractLocationFromText(text),
     jobDescription: text,
+    applicationQuestions: readQuestions(payload),
     warnings: [],
   };
 }

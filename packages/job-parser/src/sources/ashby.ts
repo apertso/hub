@@ -1,5 +1,6 @@
 import { requestSignal } from "../utils/abort.js";
-import { JobParserError, type ParsedJobFields } from "../types.js";
+import { JobParserError, type ApplicationQuestion, type ParsedJobFields } from "../types.js";
+import { buildApplicationQuestions } from "../utils/questions.js";
 import {
   extractCompanyFromText,
   extractLocationFromText,
@@ -23,6 +24,16 @@ const ASHBY_GRAPHQL_QUERY = `query ApiJobPosting($organizationHostedJobsPageName
     employmentType
     compensationTierSummary
     descriptionHtml
+    applicationForm {
+      sections {
+        fieldEntries {
+          ... on FormFieldEntry {
+            isRequired
+            field
+          }
+        }
+      }
+    }
   }
 }`;
 
@@ -129,6 +140,26 @@ async function fetchAshbyBoardJob(boardToken: string, jobId: string, signal?: Ab
   return null;
 }
 
+function readQuestions(posting: Record<string, unknown> | null): ApplicationQuestion[] {
+  const sections = asRecord(posting?.applicationForm)?.sections;
+  if (!Array.isArray(sections)) {
+    return [];
+  }
+  return buildApplicationQuestions(sections.flatMap((section) => {
+    const entries = asRecord(section)?.fieldEntries;
+    return Array.isArray(entries) ? entries : [];
+  }).map((entry) => {
+    const record = asRecord(entry) ?? {};
+    const field = asRecord(record.field) ?? {};
+    const values = Array.isArray(field.selectableValues) ? field.selectableValues : [];
+    return {
+      label: field.title,
+      required: record.isRequired,
+      options: values.map((value) => asRecord(value)?.label),
+    };
+  }));
+}
+
 export async function fetchAshbyJob(url: string, signal?: AbortSignal): Promise<ParsedJobFields> {
   const target = parseAshbyJobTarget(url);
   if (!target) {
@@ -171,6 +202,7 @@ export async function fetchAshbyJob(url: string, signal?: AbortSignal): Promise<
     salary: readString(posting, "compensationTierSummary") || extractSalaryFromText(text),
     location: location || extractLocationFromText(text),
     jobDescription: text,
+    applicationQuestions: readQuestions(graphqlPosting),
     warnings: [],
   };
 }

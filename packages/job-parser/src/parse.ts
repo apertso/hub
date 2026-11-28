@@ -87,6 +87,7 @@ function buildSuccessResult(
     salary: fields.salary,
     location: fields.location,
     jobDescription: fields.jobDescription,
+    ...(fields.applicationQuestions?.length ? { applicationQuestions: fields.applicationQuestions } : {}),
     warnings: [...new Set(origin.browser ? ["Jina rendered the vacancy in a browser.", ...warnings] : warnings)],
   };
 }

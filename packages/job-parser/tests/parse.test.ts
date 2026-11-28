@@ -496,6 +496,17 @@ describe("parseJob", () => {
       metadata: [
         { name: "Salary range", value: "€70,000 - €90,000" },
       ],
+      questions: [
+        { label: "First Name", required: true, fields: [{ name: "first_name", type: "input_text", values: [] }] },
+        { label: "Are you willing to work four days per week in our Limassol office?", required: true, fields: [{ name: "question_1", type: "input_text", values: [] }] },
+        {
+          label: "Will you require visa sponsorship?",
+          required: false,
+          fields: [{ name: "question_2", type: "multi_value_single_select", values: [{ label: "Yes", value: 1 }, { label: "No", value: 0 }] }],
+        },
+        { label: "   ", required: true, fields: [] },
+      ],
+      compliance: [{ type: "eeoc", questions: [{ label: "VeteranStatus", required: false, fields: [] }] }],
       content: [
         "&lt;div&gt;&lt;p&gt;BrainRocket is a global company creating end-to-end tech products for fintech clients.&lt;/p&gt;&lt;/div&gt;",
         "&lt;div&gt;&lt;p&gt;We are looking for a skilled Senior Node.js Developer to join our product engineering team.&lt;/p&gt;",
@@ -504,7 +515,7 @@ describe("parseJob", () => {
       ].join(""),
     };
     const fetchMock = vi.fn(async (input: unknown) => {
-      if (String(input) === "https://boards-api.greenhouse.io/v1/boards/brainrocketltd/jobs/4643018101") {
+      if (String(input) === "https://boards-api.greenhouse.io/v1/boards/brainrocketltd/jobs/4643018101?questions=true") {
         return okJson(greenhousePayload);
       }
       return new Response("", { status: 404 });
@@ -519,6 +530,11 @@ describe("parseJob", () => {
     expect(result.positionTitle).toBe("Senior Node.js Developer");
     expect(result.location).toBe("Limassol, Cyprus");
     expect(result.salary).toBe("€70,000 - €90,000");
+    expect(result.applicationQuestions).toEqual([
+      { label: "First Name", required: true, options: [] },
+      { label: "Are you willing to work four days per week in our Limassol office?", required: true, options: [] },
+      { label: "Will you require visa sponsorship?", required: false, options: ["Yes", "No"] },
+    ]);
     expect(result.jobDescription).toContain("BrainRocket is a global company");
     expect(result.jobDescription).toContain("Requirements:");
     expect(result.jobDescription).not.toContain("Title:");
@@ -711,7 +727,7 @@ describe("parseJob", () => {
     initializeJobParser({ openRouterApiKey: "test-openrouter-key" });
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = String(input);
-      if (url === "https://boards-api.greenhouse.io/v1/boards/brainrocketltd/jobs/4643018101") {
+      if (url === "https://boards-api.greenhouse.io/v1/boards/brainrocketltd/jobs/4643018101?questions=true") {
         return new Response("", { status: 500 });
       }
       if (url === `https://r.jina.ai/${GREENHOUSE_URL}`) {
@@ -1005,6 +1021,29 @@ ${LONG_DESCRIPTION}`, "text/plain; charset=utf-8");
               employmentType: "FullTime",
               compensationTierSummary: "",
               descriptionHtml,
+              applicationForm: {
+                sections: [
+                  { fieldEntries: [{ isRequired: true, field: { title: "Name", type: "String" } }] },
+                  {
+                    fieldEntries: [
+                      {
+                        isRequired: true,
+                        field: {
+                          title: "Are you a resident of one of the following provinces?",
+                          type: "ValueSelect",
+                          selectableValues: [
+                            { label: "British Columbia", value: "bc" },
+                            { label: "Ontario", value: "on" },
+                            { label: "I do not live in one of these locations", value: "none" },
+                          ],
+                        },
+                      },
+                      { isRequired: true, field: { title: "Do you or will you require sponsorship for an employment visa?", type: "Boolean" } },
+                      {},
+                    ],
+                  },
+                ],
+              },
             },
           },
         });
@@ -1020,6 +1059,15 @@ ${LONG_DESCRIPTION}`, "text/plain; charset=utf-8");
     expect(result.companyName).toBe("Improbable");
     expect(result.positionTitle).toBe("Product Engineer");
     expect(result.location).toBe("Remote - International");
+    expect(result.applicationQuestions).toEqual([
+      { label: "Name", required: true, options: [] },
+      {
+        label: "Are you a resident of one of the following provinces?",
+        required: true,
+        options: ["British Columbia", "Ontario", "I do not live in one of these locations"],
+      },
+      { label: "Do you or will you require sponsorship for an employment visa?", required: true, options: [] },
+    ]);
     expect(result.jobDescription).toContain("Bolter is an AI agent platform");
     expect(result.jobDescription).toContain("product engineer");
     expect(result.jobDescription).not.toContain("Title:");
@@ -1062,6 +1110,8 @@ ${LONG_DESCRIPTION}`, "text/plain; charset=utf-8");
     expect(result.source).toBe("ashby");
     expect(result.companyName).toBe("Improbable");
     expect(result.jobDescription).toContain("Bolter is an AI agent platform");
+    // The public board API has no application form.
+    expect(result).not.toHaveProperty("applicationQuestions");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 

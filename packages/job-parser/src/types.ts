@@ -17,12 +17,22 @@ export function isJobParseSource(value: unknown): value is JobParseSource {
   return typeof value === "string" && (JOB_PARSE_SOURCES as readonly string[]).includes(value);
 }
 
+/** A question from the vacancy's own application form, as exposed by the ATS. */
+export type ApplicationQuestion = {
+  label: string;
+  required: boolean;
+  /** Choice labels for select questions; empty for free-text, yes/no and file fields. */
+  options: string[];
+};
+
 export type ParsedJobFields = {
   companyName: string;
   positionTitle: string;
   salary: string;
   location: string;
   jobDescription: string;
+  /** Present only for sources that expose the application form (Ashby, Greenhouse). */
+  applicationQuestions?: ApplicationQuestion[];
   warnings: string[];
 };
 
